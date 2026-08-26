@@ -1,0 +1,28 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# SSH keys (never commit)
+config/ssh/
+*.pem
+id_rsa
+id_ed25519
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+
+# Environment files
+.env
+.env.*
+!.env.example

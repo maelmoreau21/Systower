@@ -1,0 +1,45 @@
+# ============================================================================
+# Systower — Docker Compose Example
+# ============================================================================
+# Ready-to-use configuration. Adjust environment variables as needed.
+# ============================================================================
+
+services:
+  systower:
+    image: ghcr.io/mael/systower:latest
+    container_name: systower
+    restart: unless-stopped
+    volumes:
+      # Required: Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # Optional: SSH key for system updates
+      # - ~/.ssh/id_rsa:/config/ssh/id_rsa:ro
+
+      # Optional: Hosts configuration file
+      # - ./hosts.conf:/config/hosts.conf:ro
+
+    environment:
+      # Schedule: Run every day at 4 AM
+      SYSTOWER_CRON: "0 4 * * *"
+
+      # Run a check immediately when the container starts
+      SYSTOWER_RUN_ON_START: "true"
+
+      # Docker container updates
+      SYSTOWER_DOCKER_ENABLED: "true"
+      # SYSTOWER_DOCKER_EXCLUDE: "postgres,redis"
+      # SYSTOWER_DOCKER_INCLUDE_ONLY: ""
+      SYSTOWER_DOCKER_CLEANUP: "true"
+      SYSTOWER_DOCKER_STOP_TIMEOUT: "30"
+      SYSTOWER_DOCKER_MONITOR_ONLY: "false"
+
+      # System updates (disabled by default)
+      SYSTOWER_SYSTEM_ENABLED: "false"
+      # SYSTOWER_SYSTEM_HOSTS: "pi@192.168.1.100,admin@debian.local:2222"
+      SYSTOWER_SYSTEM_REBOOT: "false"
+
+      # General
+      SYSTOWER_LOG_LEVEL: "info"
+      SYSTOWER_DRY_RUN: "false"
+      TZ: "Europe/Paris"
