@@ -94,17 +94,18 @@ function requireAuth(req, res, next) {
         return next();
     }
 
-    // Unauthenticated request
+    // Unauthenticated API request -> return JSON 401
     if (req.path.startsWith('/api/')) {
         const loginUrl = isOidcEnabled() ? '/auth/login' : '/login.html';
-        return res.status(401).json({ error: 'Unauthorized', loginUrl });
+        return res.status(401).json({ error: 'Unauthorized', authenticated: false, loginUrl });
     }
 
-    // Allow public assets on login page
+    // Allow public assets
     if (req.path === '/login.html' || req.path === '/auth/local-login' || req.path.startsWith('/css/') || req.path.startsWith('/js/')) {
         return next();
     }
 
+    // Unauthenticated page request -> redirect to login
     if (isOidcEnabled()) {
         return res.redirect('/auth/login');
     } else {

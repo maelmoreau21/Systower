@@ -1,31 +1,31 @@
 # ============================================================================
-# Systower v2 — Docker Compose Example
+# Systower v2 — Docker Compose
 # ============================================================================
-# Ready-to-use configuration with Web UI and OIDC SSO support.
+# Ultra-lightweight automated container & host system updater with Web UI.
 # ============================================================================
 
 services:
   systower:
-    image: ghcr.io/mael/systower:latest
+    image: ghcr.io/maelmoreau21/systower:latest
     container_name: systower
     restart: unless-stopped
+    # Optional: enable pid: "host" and privileged: true only if you want host OS package updates
+    # pid: "host"
+    # privileged: true
     ports:
-      - "8080:8080" # Web UI Dashboard
+      - "8080:8080" # Web UI Dashboard (remove if SYSTOWER_UI_ENABLED: "false")
     volumes:
-      # Required: Docker socket for container management
+      # Required: Docker socket for local container management
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
-      # Persistent configuration (settings, hosts, exclusions edited from Web UI)
+      # Persistent configuration (settings & exclusions)
       - ./config:/config
-
-      # Optional: SSH key for system updates
-      # - ~/.ssh/id_rsa:/config/ssh/id_rsa:ro
 
       # Optional: Private Docker registries credentials
       # - ~/.docker/config.json:/root/.docker/config.json:ro
 
     environment:
-      # General Schedule (Cron)
+      # General Schedule (Cron syntax: e.g. 4:00 AM every day)
       SYSTOWER_CRON: "0 4 * * *"
       SYSTOWER_RUN_ON_START: "true"
       SYSTOWER_LOG_LEVEL: "info"
@@ -36,33 +36,31 @@ services:
       SYSTOWER_DOCKER_ENABLED: "true"
       SYSTOWER_DOCKER_CLEANUP: "true"
       SYSTOWER_DOCKER_STOP_TIMEOUT: "30"
-      SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT: "30"
-      SYSTOWER_DOCKER_COMPOSE_AWARE: "true"
       SYSTOWER_DOCKER_MONITOR_ONLY: "false"
       # SYSTOWER_DOCKER_EXCLUDE: "postgres,redis"
       # SYSTOWER_DOCKER_INCLUDE_ONLY: ""
 
-      # System Updates via SSH (Debian, Ubuntu, Raspberry Pi OS, Alpine)
+      # Host OS Updates (Debian, Ubuntu, Raspberry Pi OS, Alpine)
+      # Requires pid: "host" and privileged: true above
       SYSTOWER_SYSTEM_ENABLED: "false"
       SYSTOWER_SYSTEM_REBOOT: "false"
-      # SYSTOWER_SYSTEM_HOSTS: "pi@192.168.1.100,admin@debian.local:2222"
 
-      # Web UI & Authentication
-      SYSTOWER_UI_ENABLED: "true"
+      # Web UI & Security
+      SYSTOWER_UI_ENABLED: "true" # Set "false" for headless minimal mode (< 5MB RAM)
       SYSTOWER_UI_PORT: "8080"
 
-      # Option A: Simple Username / Password Authentication
-      # SYSTOWER_AUTH_USERNAME: "admin"   # or USERNAME: "admin"
-      # SYSTOWER_AUTH_PASSWORD: "secretpassword" # or PASSWORD: "secretpassword"
+      # Option A: Simple Username & Password
+      USERNAME: "admin"
+      PASSWORD: "changeme123"
 
-      # Option B: OIDC Single Sign-On (Authentik, Authelia, Keycloak, Okta, etc.)
+      # Option B: OIDC Single Sign-On (Authentik, Authelia, Keycloak, etc.)
       SYSTOWER_OIDC_ENABLED: "false"
       # SYSTOWER_OIDC_ISSUER: "https://auth.example.com/application/o/systower/"
       # SYSTOWER_OIDC_CLIENT_ID: "systower-client-id"
       # SYSTOWER_OIDC_CLIENT_SECRET: "your-client-secret"
       # SYSTOWER_OIDC_REDIRECT_URI: "https://systower.example.com/auth/callback"
 
-      # Multi-Channel Notifications
+      # Multi-Channel Notifications (Discord, Slack, Telegram, Webhook)
       SYSTOWER_NOTIFY_ENABLED: "false"
       # SYSTOWER_NOTIFY_DISCORD: "https://discord.com/api/webhooks/..."
       # SYSTOWER_NOTIFY_SLACK: "https://hooks.slack.com/services/..."

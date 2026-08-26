@@ -13,11 +13,21 @@ document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initUserProfile();
     loadContainers();
-    loadSystemHosts();
+    loadHostSystem();
     loadConfig();
     initLogStream();
     initTopActions();
 });
+
+// Helper for safe JSON fetching with auth redirect
+async function safeFetch(url, options = {}) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        window.location.href = '/login.html';
+        throw new Error('Unauthorized');
+    }
+    return res;
+}
 
 // Toast notifications
 function showToast(message, type = 'info') {
@@ -35,7 +45,7 @@ function showToast(message, type = 'info') {
     }, 4000);
 }
 
-// User Profile & OIDC
+// User Profile & OIDC / Password Auth
 async function initUserProfile() {
     try {
         const res = await fetch('/auth/user');
@@ -47,11 +57,11 @@ async function initUserProfile() {
         const logoutBtn = document.getElementById('btn-logout');
 
         if (data.authenticated && data.user) {
-            nameEl.textContent = data.user.name || 'User';
+            nameEl.textContent = data.user.name || 'Admin';
             emailEl.textContent = data.user.email || '';
-            avatarEl.textContent = (data.user.name || 'U').charAt(0).toUpperCase();
+            avatarEl.textContent = (data.user.name || 'A').charAt(0).toUpperCase();
 
-            if (data.oidcEnabled || data.basicAuthEnabled) {
+            if (data.authRequired || data.oidcEnabled || data.basicAuthEnabled) {
                 logoutBtn.style.display = 'flex';
             }
         }
@@ -87,7 +97,7 @@ function switchTab(tabId) {
     // Update Title
     const titleMap = {
         containers: { title: 'Docker Containers', subtitle: 'Monitor and update containers running on this Docker engine' },
-        system: { title: 'System Hosts', subtitle: 'Manage remote Linux systems (Raspberry Pi, Debian, Ubuntu) via SSH' },
+        system: { title: 'Host System', subtitle: 'Manage updates for the local host operating system' },
         settings: { title: 'Configuration', subtitle: 'Configure automated scheduling, Docker filters, and update policies' },
         notifications: { title: 'Notifications', subtitle: 'Receive alerts when container or system updates occur' },
         logs: { title: 'Live Logs', subtitle: 'Real-time engine and web service logs' }
@@ -100,7 +110,7 @@ function switchTab(tabId) {
 
     // Refresh active tab data
     if (tabId === 'containers') loadContainers();
-    if (tabId === 'system') loadSystemHosts();
+    if (tabId === 'system') loadHostSystem();
     if (tabId === 'settings') loadConfig();
 }
 
@@ -113,11 +123,12 @@ function initTopActions() {
         showToast('Triggering full Systower update cycle...', 'info');
 
         try {
-            const res = await fetch('/api/config/trigger-run', { method: 'POST' });
+            const res = await safeFetch('/api/config/trigger-run', { method: 'POST' });
             const data = await res.json();
             if (data.success) {
                 showToast('Update cycle completed successfully!', 'success');
                 loadContainers();
+                loadHostSystem();
             } else {
                 showToast(`Run completed with errors: ${data.error || 'Check logs'}`, 'error');
             }
@@ -146,6 +157,23 @@ function initTopActions() {
             renderContainers(document.getElementById('container-search').value);
         });
     });
+
+    // Host system update button
+    document.getElementById('btn-update-host-system')?.addEventListener('click', async () => {
+        showToast('Starting system update on host machine...', 'info');
+        try {
+            const res = await safeFetch('/api/system/update', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Host system update finished successfully!', 'success');
+                loadHostSystem();
+            } else {
+                showToast(`Host update error: ${data.error}`, 'error');
+            }
+        } catch (e) {
+            showToast(`Host update failed: ${e.message}`, 'error');
+        }
+    });
 }
 
 // ============================================================================
@@ -155,7 +183,7 @@ function initTopActions() {
 async function loadContainers() {
     const listEl = document.getElementById('containers-list');
     try {
-        const res = await fetch('/api/containers');
+        const res = await safeFetch('/api/containers');
         const data = await res.json();
         containersData = data.containers || [];
 
@@ -237,7 +265,7 @@ function renderContainers(searchQuery = '') {
 async function updateContainer(id, name) {
     showToast(`Starting update for container '${name}'...`, 'info');
     try {
-        const res = await fetch(`/api/containers/${id}/update`, { method: 'POST' });
+        const res = await safeFetch(`/api/containers/${id}/update`, { method: 'POST' });
         const data = await res.json();
         if (data.success) {
             showToast(`Container '${name}' updated successfully!`, 'success');
@@ -252,7 +280,7 @@ async function updateContainer(id, name) {
 
 async function toggleContainerExclude(name) {
     try {
-        const res = await fetch(`/api/containers/${encodeURIComponent(name)}/toggle-exclude`, { method: 'POST' });
+        const res = await safeFetch(`/api/containers/${encodeURIComponent(name)}/toggle-exclude`, { method: 'POST' });
         const data = await res.json();
         if (data.success) {
             showToast(`Container '${name}' ${data.isExcluded ? 'excluded' : 'included'} in update list`, 'info');
@@ -271,7 +299,7 @@ async function inspectContainer(id, name) {
     modal.classList.add('active');
 
     try {
-        const res = await fetch(`/api/containers/${id}/inspect`);
+        const res = await safeFetch(`/api/containers/${id}/inspect`);
         const json = await res.json();
         content.textContent = JSON.stringify(json, null, 2);
     } catch (err) {
@@ -284,157 +312,26 @@ function closeInspectModal() {
 }
 
 // ============================================================================
-// 2. SYSTEM HOSTS
+// 2. HOST SYSTEM
 // ============================================================================
 
-async function loadSystemHosts() {
-    const tableBody = document.getElementById('system-hosts-table');
+async function loadHostSystem() {
     try {
-        const res = await fetch('/api/system/hosts');
+        const res = await safeFetch('/api/system/status');
         const data = await res.json();
-        const hosts = data.hosts || [];
-
-        document.getElementById('host-count-badge').textContent = hosts.length;
-
-        if (hosts.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="4" class="empty-state">No remote hosts configured. Click "Add Host" to register SSH targets.</td></tr>`;
-            return;
-        }
-
-        tableBody.innerHTML = hosts.map(h => {
-            let user = 'root';
-            let host = h;
-            let port = '22';
-
-            if (host.includes('@')) {
-                const parts = host.split('@');
-                user = parts[0];
-                host = parts[1];
+        if (data.success && data.host) {
+            document.getElementById('host-os-name').textContent = data.host.os;
+            document.getElementById('host-kernel').textContent = data.host.kernel;
+            document.getElementById('host-uptime').textContent = data.host.uptime;
+            const badge = document.getElementById('host-status-badge');
+            if (data.host.rebootRequired) {
+                badge.innerHTML = `<span class="status-badge starting">Reboot Required</span>`;
+            } else {
+                badge.innerHTML = `<span class="status-badge healthy">Online</span>`;
             }
-            if (host.includes(':')) {
-                const parts = host.split(':');
-                host = parts[0];
-                port = parts[1];
-            }
-
-            return `
-                <tr>
-                    <td><strong>${user}@${host}</strong></td>
-                    <td id="status-${h}"><span class="tag">Configured</span></td>
-                    <td><code>:${port}</code></td>
-                    <td>
-                        <button class="btn btn-secondary btn-sm" onclick="testHost('${h}')">Test SSH</button>
-                        <button class="btn btn-primary btn-sm" onclick="updateHost('${h}')">Update</button>
-                        <button class="btn btn-secondary btn-sm btn-icon" onclick="deleteHost('${h}')" title="Remove host">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    } catch (err) {
-        tableBody.innerHTML = `<tr><td colspan="4" class="error-card">Failed to load hosts: ${err.message}</td></tr>`;
-    }
-}
-
-document.getElementById('btn-add-host-modal').addEventListener('click', () => {
-    document.getElementById('modal-host-input').value = '';
-    document.getElementById('add-host-modal').classList.add('active');
-});
-
-function closeAddHostModal() {
-    document.getElementById('add-host-modal').classList.remove('active');
-}
-
-document.getElementById('btn-save-new-host').addEventListener('click', async () => {
-    const hostInput = document.getElementById('modal-host-input').value.trim();
-    if (!hostInput) {
-        showToast('Please enter a host target (e.g. pi@192.168.1.100:22)', 'error');
-        return;
-    }
-
-    try {
-        const res = await fetch('/api/system/hosts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host: hostInput })
-        });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Host '${hostInput}' added successfully!`, 'success');
-            closeAddHostModal();
-            loadSystemHosts();
-        } else {
-            showToast(`Failed to add host: ${data.error}`, 'error');
         }
-    } catch (err) {
-        showToast(`Error adding host: ${err.message}`, 'error');
-    }
-});
-
-async function deleteHost(host) {
-    if (!confirm(`Are you sure you want to remove ${host}?`)) return;
-
-    try {
-        const res = await fetch('/api/system/hosts', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host })
-        });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Host '${host}' removed`, 'info');
-            loadSystemHosts();
-        }
-    } catch (err) {
-        showToast(`Error removing host: ${err.message}`, 'error');
-    }
-}
-
-async function testHost(host) {
-    const statusCell = document.getElementById(`status-${host}`);
-    if (statusCell) statusCell.innerHTML = `<span class="tag">Testing...</span>`;
-    showToast(`Testing SSH connection to ${host}...`, 'info');
-
-    try {
-        const res = await fetch('/api/system/test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host })
-        });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Connection to ${host} successful!`, 'success');
-            if (statusCell) statusCell.innerHTML = `<span class="status-badge healthy">Online</span>`;
-        } else {
-            showToast(`Connection failed: ${data.error}`, 'error');
-            if (statusCell) statusCell.innerHTML = `<span class="status-badge unhealthy">Failed</span>`;
-        }
-    } catch (err) {
-        showToast(`Connection error: ${err.message}`, 'error');
-        if (statusCell) statusCell.innerHTML = `<span class="status-badge unhealthy">Error</span>`;
-    }
-}
-
-async function updateHost(host) {
-    showToast(`Triggering system update on ${host}...`, 'info');
-    try {
-        const res = await fetch('/api/system/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host })
-        });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`System update for ${host} completed successfully!`, 'success');
-        } else {
-            showToast(`System update error: ${data.error}`, 'error');
-        }
-    } catch (err) {
-        showToast(`Update failed: ${err.message}`, 'error');
+    } catch (e) {
+        console.error('Failed to load host status', e);
     }
 }
 
@@ -444,7 +341,7 @@ async function updateHost(host) {
 
 async function loadConfig() {
     try {
-        const res = await fetch('/api/config');
+        const res = await safeFetch('/api/config');
         const cfg = await res.json();
 
         // Populate general
@@ -459,7 +356,6 @@ async function loadConfig() {
         if (cfg.docker) {
             document.getElementById('cfg-dockerEnabled').checked = cfg.docker.enabled !== false;
             document.getElementById('cfg-dockerCleanup').checked = cfg.docker.cleanup !== false;
-            document.getElementById('cfg-dockerComposeAware').checked = cfg.docker.composeAware !== false;
             document.getElementById('cfg-dockerMonitorOnly').checked = !!cfg.docker.monitorOnly;
             document.getElementById('cfg-stopTimeout').value = cfg.docker.stopTimeout || 30;
             document.getElementById('cfg-healthcheckTimeout').value = cfg.docker.healthcheckTimeout || 30;
@@ -469,7 +365,6 @@ async function loadConfig() {
         if (cfg.system) {
             document.getElementById('cfg-systemEnabled').checked = !!cfg.system.enabled;
             document.getElementById('cfg-systemReboot').checked = !!cfg.system.reboot;
-            document.getElementById('cfg-sshKeyPath').value = cfg.system.sshKeyPath || '/config/ssh/id_rsa';
         }
 
         // Populate notifications
@@ -498,7 +393,6 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
         docker: {
             enabled: document.getElementById('cfg-dockerEnabled').checked,
             cleanup: document.getElementById('cfg-dockerCleanup').checked,
-            composeAware: document.getElementById('cfg-dockerComposeAware').checked,
             monitorOnly: document.getElementById('cfg-dockerMonitorOnly').checked,
             stopTimeout: parseInt(document.getElementById('cfg-stopTimeout').value, 10),
             healthcheckTimeout: parseInt(document.getElementById('cfg-healthcheckTimeout').value, 10),
@@ -507,24 +401,21 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
         },
         system: {
             enabled: document.getElementById('cfg-systemEnabled').checked,
-            reboot: document.getElementById('cfg-systemReboot').checked,
-            sshKeyPath: document.getElementById('cfg-sshKeyPath').value.trim(),
-            hosts: []
+            reboot: document.getElementById('cfg-systemReboot').checked
         }
     };
 
-    // Preserve existing hosts & exclusion lists
+    // Preserve existing exclusions
     try {
-        const curRes = await fetch('/api/config');
+        const curRes = await safeFetch('/api/config');
         const cur = await curRes.json();
         config.docker.exclude = cur.docker?.exclude || [];
         config.docker.includeOnly = cur.docker?.includeOnly || [];
-        config.system.hosts = cur.system?.hosts || [];
         config.notifications = cur.notifications || {};
     } catch (e) {}
 
     try {
-        const res = await fetch('/api/config', {
+        const res = await safeFetch('/api/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -557,7 +448,7 @@ async function testNotification(type) {
     if (type === 'webhook') payload.webhookUrl = document.getElementById('notif-webhook-url').value.trim();
 
     try {
-        const res = await fetch('/api/notifications/test', {
+        const res = await safeFetch('/api/notifications/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -575,7 +466,7 @@ async function testNotification(type) {
 
 document.getElementById('btn-save-notifications').addEventListener('click', async () => {
     try {
-        const curRes = await fetch('/api/config');
+        const curRes = await safeFetch('/api/config');
         const config = await curRes.json();
 
         config.notifications = {
@@ -586,7 +477,7 @@ document.getElementById('btn-save-notifications').addEventListener('click', asyn
             webhook: { enabled: !!document.getElementById('notif-webhook-url').value, url: document.getElementById('notif-webhook-url').value.trim() }
         };
 
-        const res = await fetch('/api/config', {
+        const res = await safeFetch('/api/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -672,7 +563,7 @@ function startLogPolling() {
 
 async function fetchLogsHttp() {
     try {
-        const res = await fetch(`/api/logs?source=${currentLogSource}&lines=200`);
+        const res = await safeFetch(`/api/logs?source=${currentLogSource}&lines=200`);
         const data = await res.json();
         const logOutput = document.getElementById('log-output');
         logOutput.textContent = data.logs || 'No logs available.';

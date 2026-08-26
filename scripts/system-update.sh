@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Systower — System Update Engine
+# Systower — Host System Update Engine
 # ============================================================================
-# Connects to remote hosts via SSH and performs system updates using the
-# appropriate package manager (apt-get for Debian/Ubuntu/Raspberry Pi OS).
+# Updates the local host machine (Debian, Ubuntu, Raspberry Pi OS, Alpine)
+# directly without requiring any SSH connections or credentials.
 # ============================================================================
 
 set -euo pipefail
@@ -15,249 +15,125 @@ source "${SCRIPT_DIR}/utils.sh"
 source "${SCRIPT_DIR}/notifications.sh"
 
 # ----------------------------------------------------------------------------
-# SSH execution
+# Host command execution
 # ----------------------------------------------------------------------------
 
-# Execute a command on a remote host via SSH
-# Arguments: $1 - user, $2 - host, $3 - port, $4 - command
-# Returns: exit code of the remote command
-ssh_exec() {
-    local user="$1"
-    local host="$2"
-    local port="$3"
-    local command="$4"
-
-    local ssh_key="${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}"
-
-    local -a ssh_opts=(
-        -o "StrictHostKeyChecking=no"
-        -o "UserKnownHostsFile=/dev/null"
-        -o "ConnectTimeout=10"
-        -o "BatchMode=yes"
-        -o "LogLevel=ERROR"
-        -i "$ssh_key"
-        -p "$port"
-    )
-
-    ssh "${ssh_opts[@]}" "${user}@${host}" "$command"
-}
-
-# Test SSH connectivity to a host
-# Arguments: $1 - user, $2 - host, $3 - port
-# Returns: 0 if reachable, 1 if not
-test_ssh_connection() {
-    local user="$1"
-    local host="$2"
-    local port="$3"
-
-    if ssh_exec "$user" "$host" "$port" "echo ok" > /dev/null 2>&1; then
-        return 0
+# Execute a command directly in the host OS namespace
+host_exec() {
+    local cmd="$1"
+    if command -v nsenter >/dev/null 2>&1 && [ -d /proc/1 ]; then
+        # Run via host PID 1 namespace (standard Docker host management)
+        nsenter --target 1 --mount --uts --ipc --net --pid -- sh -c "$cmd"
+    elif [ -d /host/etc ]; then
+        # Fallback if host root is mounted at /host
+        chroot /host sh -c "$cmd"
+    else
+        # Direct execution
+        sh -c "$cmd"
     fi
-    return 1
 }
 
-# ----------------------------------------------------------------------------
-# System detection and update
-# ----------------------------------------------------------------------------
-
-# Detect the OS of a remote host
-# Arguments: $1 - user, $2 - host, $3 - port
-# Outputs: OS identifier (debian, ubuntu, raspbian, unknown)
-detect_remote_os() {
-    local user="$1"
-    local host="$2"
-    local port="$3"
-
-    local os_info
-    os_info=$(ssh_exec "$user" "$host" "$port" "cat /etc/os-release 2>/dev/null || echo 'unknown'" 2>/dev/null || echo "unknown")
+# Detect OS of the host machine
+detect_host_os() {
+    local os_info=""
+    if [ -f /host/etc/os-release ]; then
+        os_info=$(cat /host/etc/os-release 2>/dev/null || echo "")
+    else
+        os_info=$(host_exec "cat /etc/os-release 2>/dev/null" 2>/dev/null || cat /etc/os-release 2>/dev/null || echo "")
+    fi
 
     if echo "$os_info" | grep -qi "raspbian\|raspberry"; then
-        echo "raspbian"
+        echo "Raspberry Pi OS"
     elif echo "$os_info" | grep -qi "ubuntu"; then
-        echo "ubuntu"
+        echo "Ubuntu"
     elif echo "$os_info" | grep -qi "debian"; then
-        echo "debian"
+        echo "Debian"
     elif echo "$os_info" | grep -qi "alpine"; then
-        echo "alpine"
+        echo "Alpine"
+    elif echo "$os_info" | grep -qi "arch"; then
+        echo "Arch Linux"
+    elif echo "$os_info" | grep -qi "fedora\|rhel\|centos"; then
+        echo "Fedora/RHEL"
     else
-        echo "unknown"
+        echo "Debian"
     fi
 }
 
-# Perform system update on a remote host
-# Arguments: $1 - user, $2 - host, $3 - port
-# Returns: 0 on success, 1 on failure
-update_remote_host() {
-    local user="$1"
-    local host="$2"
-    local port="$3"
-    local host_display="${user}@${host}:${port}"
+# Perform system updates on the local host machine
+update_local_host() {
+    local os_name
+    os_name=$(detect_host_os)
+    log_info "Detected Host OS: $os_name"
 
-    log_info "Connecting to $host_display..."
-
-    # Test connectivity
-    if ! test_ssh_connection "$user" "$host" "$port"; then
-        log_error "Cannot connect to $host_display"
-        notify_system_update "$host_display" "error"
-        return 1
-    fi
-
-    # Detect OS
-    local os_type
-    os_type=$(detect_remote_os "$user" "$host" "$port")
-    log_info "  Detected OS: $os_type"
-
-    # Build update command based on OS
     local update_cmd=""
-    case "$os_type" in
-        debian|ubuntu|raspbian)
-            update_cmd="export DEBIAN_FRONTEND=noninteractive && "
-            update_cmd+="sudo apt-get update -qq && "
-            update_cmd+="sudo apt-get upgrade -y -qq --with-new-pkgs && "
-            update_cmd+="sudo apt-get autoremove -y -qq && "
-            update_cmd+="sudo apt-get autoclean -qq"
+    case "$os_name" in
+        "Debian"|"Ubuntu"|"Raspberry Pi OS")
+            update_cmd="export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get upgrade -y -qq && apt-get autoremove -y -qq && apt-get autoclean -qq"
             ;;
-        alpine)
-            update_cmd="sudo apk update && sudo apk upgrade --no-cache"
+        "Alpine")
+            update_cmd="apk update && apk upgrade --no-cache"
+            ;;
+        "Arch Linux")
+            update_cmd="pacman -Syu --noconfirm"
+            ;;
+        "Fedora/RHEL")
+            update_cmd="dnf upgrade -y -q"
             ;;
         *)
-            log_warn "  Unsupported OS type: $os_type. Skipping $host_display."
-            notify_system_update "$host_display" "error"
-            return 1
+            update_cmd="apt-get update -qq && apt-get upgrade -y -qq"
             ;;
     esac
 
     # Dry run mode
     if is_true "${SYSTOWER_DRY_RUN:-false}"; then
-        log_info "  🔍 Dry run: would execute update on $host_display"
-        log_debug "  Command: $update_cmd"
+        log_info "  🔍 Dry run: would execute on host system: $update_cmd"
         return 0
     fi
 
-    # Execute update
-    log_info "  Running system update on $host_display..."
-    local output
-    if output=$(ssh_exec "$user" "$host" "$port" "$update_cmd" 2>&1); then
-        log_info "  ✅ System update completed on $host_display"
+    log_info "  Running system package upgrade on host machine..."
+    local output=""
+    if output=$(host_exec "$update_cmd" 2>&1); then
+        log_info "  ✅ Host system update completed successfully ($os_name)!"
         log_debug "  Output: $output"
-        notify_system_update "$host_display" "success"
-    else
-        log_error "  ❌ System update failed on $host_display"
-        log_error "  Output: $output"
-        notify_system_update "$host_display" "error"
-        return 1
-    fi
+        notify_system_update "localhost (${os_name})" "success"
 
-    # Check if reboot is needed (Debian/Ubuntu)
-    if [ "$os_type" != "alpine" ]; then
-        local needs_reboot
-        needs_reboot=$(ssh_exec "$user" "$host" "$port" \
-            "[ -f /var/run/reboot-required ] && echo 'yes' || echo 'no'" 2>/dev/null || echo "no")
-
+        # Check if reboot is needed
+        local needs_reboot="no"
+        needs_reboot=$(host_exec "[ -f /var/run/reboot-required ] && echo 'yes' || echo 'no'" 2>/dev/null || echo "no")
         if [ "$needs_reboot" = "yes" ]; then
             if is_true "${SYSTOWER_SYSTEM_REBOOT:-false}"; then
-                log_warn "  🔄 Reboot required. Rebooting $host_display..."
-                if ! is_true "${SYSTOWER_DRY_RUN:-false}"; then
-                    ssh_exec "$user" "$host" "$port" "sudo reboot" 2>/dev/null || true
-                fi
+                log_warn "  🔄 Reboot required by updated packages. Rebooting host..."
+                host_exec "reboot" 2>/dev/null || true
             else
-                log_warn "  ⚠️  Reboot required on $host_display (auto-reboot disabled)"
+                log_warn "  ⚠️  Reboot required on host machine (auto-reboot disabled)"
             fi
         fi
+        return 0
+    else
+        log_error "  ❌ Host system update failed!"
+        log_error "  Error: $output"
+        notify_system_update "localhost (${os_name})" "error"
+        return 1
     fi
-
-    return 0
-}
-
-# ----------------------------------------------------------------------------
-# Main update loop
-# ----------------------------------------------------------------------------
-
-# Collect all hosts from environment variable, hosts file, and JSON config
-collect_hosts() {
-    local hosts=()
-
-    # Hosts from environment variable
-    if [ -n "${SYSTOWER_SYSTEM_HOSTS:-}" ]; then
-        while IFS= read -r host; do
-            [ -n "$host" ] && hosts+=("$host")
-        done < <(split_csv "$SYSTOWER_SYSTEM_HOSTS")
-    fi
-
-    # Hosts from JSON config file
-    local config_file="${SYSTOWER_CONFIG_FILE:-/config/systower.json}"
-    if [ -f "$config_file" ]; then
-        local json_hosts
-        json_hosts=$(jq -r '.system.hosts[]? | if type == "string" then . else (.user + "@" + .host + (if .port then ":" + (.port|tostring) else "" end)) end' "$config_file" 2>/dev/null || echo "")
-        while IFS= read -r host; do
-            [ -n "$host" ] && hosts+=("$host")
-        done <<< "$json_hosts"
-    fi
-
-    # Hosts from file
-    if [ -f "${SYSTOWER_SYSTEM_HOSTS_FILE:-}" ]; then
-        while IFS= read -r host; do
-            [ -n "$host" ] && hosts+=("$host")
-        done < <(parse_hosts_file "$SYSTOWER_SYSTEM_HOSTS_FILE")
-    fi
-
-    printf '%s\n' "${hosts[@]}"
 }
 
 # Run the system update process
 run_system_updates() {
-    log_section "🖥️  System Updates (SSH)"
+    log_section "🖥️  Host System Update"
 
-    # Check SSH key
-    local ssh_key="${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}"
-    if [ ! -f "$ssh_key" ]; then
-        log_error "SSH key not found: $ssh_key"
-        log_error "Mount your SSH key: -v ~/.ssh/id_rsa:/config/ssh/id_rsa:ro"
-        return 1
-    fi
-
-    # Ensure correct permissions on SSH key
-    chmod 600 "$ssh_key" 2>/dev/null || true
-
-    # Collect all hosts
-    local -a all_hosts=()
-    while IFS= read -r host; do
-        [ -n "$host" ] && all_hosts+=("$host")
-    done < <(collect_hosts)
-
-    if [ ${#all_hosts[@]} -eq 0 ]; then
-        log_warn "No hosts configured for system updates."
-        log_warn "Set SYSTOWER_SYSTEM_HOSTS, configure hosts in UI, or mount a hosts file."
+    if ! is_true "${SYSTOWER_SYSTEM_ENABLED:-false}"; then
+        log_info "System updates disabled (set SYSTOWER_SYSTEM_ENABLED=true to enable)."
         return 0
     fi
 
-    local total=${#all_hosts[@]}
     local updated=0
     local failed=0
 
-    log_info "Found $total host(s) to update."
-    log_info ""
-
-    for host_string in "${all_hosts[@]}"; do
-        local parsed
-        parsed=$(parse_host_string "$host_string")
-        local user host port
-        read -r user host port <<< "$parsed"
-
-        if update_remote_host "$user" "$host" "$port"; then
-            updated=$((updated + 1))
-        else
-            failed=$((failed + 1))
-        fi
-        log_info ""
-    done
-
-    # Summary
-    log_info "📊 System Update Summary:"
-    log_info "  Total hosts:    $total"
-    log_info "  Updated:        $updated"
-    log_info "  Failed:         $failed"
-    log_info ""
+    if update_local_host; then
+        updated=1
+    else
+        failed=1
+    fi
 
     export _SYSTEM_UPDATED="$updated"
     export _SYSTEM_FAILED="$failed"

@@ -45,8 +45,7 @@
                         <line x1="6" y1="6" x2="6.01" y2="6"></line>
                         <line x1="6" y1="18" x2="6.01" y2="18"></line>
                     </svg>
-                    <span>System Hosts</span>
-                    <span class="badge" id="host-count-badge">0</span>
+                    <span>Host System</span>
                 </button>
 
                 <button class="nav-item" data-tab="settings" id="nav-settings">
@@ -149,33 +148,40 @@
                 </div>
             </section>
 
-            <!-- TAB 2: System Hosts -->
+            <!-- TAB 2: Host System -->
             <section id="tab-system" class="tab-pane">
-                <div class="toolbar">
-                    <div class="section-desc">Manage SSH hosts for automated system updates (Debian, Ubuntu, Raspberry Pi OS, Alpine).</div>
-                    <button class="btn btn-primary" id="btn-add-host-modal">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="5" x2="12" y2="19"></line>
-                            <line x1="5" y1="12" x2="19" y2="12"></line>
-                        </svg>
-                        <span>Add Host</span>
-                    </button>
-                </div>
-
-                <div class="card table-card">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Host Target</th>
-                                <th>Status / OS</th>
-                                <th>SSH Port</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="system-hosts-table">
-                            <tr><td colspan="4" class="empty-state">No remote hosts configured yet.</td></tr>
-                        </tbody>
-                    </table>
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Host Machine</h2>
+                        <p class="card-desc">Keep the underlying Linux system up to date with the latest packages (Debian, Ubuntu, Raspberry Pi OS, Alpine).</p>
+                    </div>
+                    <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+                        <div class="form-group">
+                            <label>Operating System</label>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: #fff;" id="host-os-name">Loading...</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Kernel Version</label>
+                            <div style="font-size: 0.95rem; font-family: var(--font-mono); color: var(--text-muted);" id="host-kernel">-</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Host Uptime</label>
+                            <div style="font-size: 0.95rem; color: var(--text-muted);" id="host-uptime">-</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <div id="host-status-badge"><span class="tag">Online</span></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 24px; display: flex; gap: 12px;">
+                        <button class="btn btn-primary" id="btn-update-host-system">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                            <span>Update Host System Now</span>
+                        </button>
+                    </div>
                 </div>
             </section>
 

@@ -33,10 +33,17 @@ app.use(cookieSession({
     secure: process.env.NODE_ENV === 'production' && process.env.SYSTOWER_HTTPS === 'true'
 }));
 
-// OIDC Authentication setup
+// Public routes & assets (accessible before login)
+app.get('/login.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
+app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
+
+// Authentication endpoints
 setupAuthRoutes(app);
 
-// Protect API and static assets if OIDC is enabled
+// Protect API routes
 app.use('/api', requireAuth);
 
 // Mount API routes
@@ -46,17 +53,19 @@ app.use('/api/system', systemRouter);
 app.use('/api/logs', logsRouter);
 app.use('/api/notifications', notificationsRouter);
 
-// Serve static frontend files
-app.use(express.static(path.join(__dirname, 'public')));
+// Protect main dashboard
+app.get('/', requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-// SPA fallback to index.html for unknown routes
-app.get('*', (req, res) => {
+// Protect all static assets & SPA routes
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('*', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // WebSocket Live Logs Streaming
 wss.on('connection', (ws) => {
-    console.log('[WebSocket] Client connected for live logs');
     const logFile = '/var/log/systower.log';
 
     // Send recent lines immediately upon connection
@@ -87,7 +96,6 @@ wss.on('connection', (ws) => {
                         });
                         lastSize = stat.size;
                     } else if (stat.size < lastSize) {
-                        // File truncated/rotated
                         lastSize = stat.size;
                     }
                 } catch (err) {}

@@ -176,25 +176,30 @@ services:
 
 ---
 
-## 🖥️ System Updates via SSH
+## 🖥️ Host System Updates
 
-Systower can keep your remote servers and Raspberry Pi devices up to date.
+Systower can keep your host Linux operating system updated with the latest security and package patches directly — without any SSH keys, network connections, or passwords!
 
-1. **Mount your SSH private key:**
-   `-v ~/.ssh/id_rsa:/config/ssh/id_rsa:ro`
+To enable host OS package updates, add `pid: "host"` and `privileged: true` to your compose configuration:
 
-2. **Add hosts in the Web UI** or specify via environment:
-   ```bash
-   SYSTOWER_SYSTEM_ENABLED=true
-   SYSTOWER_SYSTEM_HOSTS="pi@192.168.1.100,admin@server.local:2222"
-   SYSTOWER_SYSTEM_REBOOT=false # Set to true to allow auto-reboot if required
-   ```
+```yaml
+services:
+  systower:
+    image: ghcr.io/maelmoreau21/systower:latest
+    pid: "host"
+    privileged: true
+    environment:
+      SYSTOWER_SYSTEM_ENABLED: "true"
+      SYSTOWER_SYSTEM_REBOOT: "false" # Set true to auto-reboot if required by packages
+```
 
-Supported operating systems:
+Supported host systems:
 - **Debian** (all versions)
 - **Ubuntu** (all versions)
-- **Raspberry Pi OS**
+- **Raspberry Pi OS** (all versions)
 - **Alpine Linux**
+- **Arch Linux**
+- **Fedora / RHEL**
 
 ---
 
@@ -213,16 +218,13 @@ Supported operating systems:
 | `SYSTOWER_DOCKER_CLEANUP` | `true` | Delete previous image after successful update |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
 | `SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT`| `30` | Timeout in seconds to verify container health post-update |
-| `SYSTOWER_DOCKER_COMPOSE_AWARE`| `true` | Detect Compose projects and update via compose |
 | `SYSTOWER_DOCKER_MONITOR_ONLY` | `false` | Detect available updates without applying |
-| `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable SSH system updates |
-| `SYSTOWER_SYSTEM_HOSTS` | `""` | Comma-separated list of `user@host:port` |
-| `SYSTOWER_SYSTEM_SSH_KEY` | `/config/ssh/id_rsa`| Path to private SSH key |
-| `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot systems if kernel/packages require it |
-| `SYSTOWER_UI_ENABLED` | `true` | Enable Web UI dashboard |
+| `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |
+| `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot host system if kernel/packages require it |
+| `SYSTOWER_UI_ENABLED` | `true` | Enable Web UI dashboard (set `false` for minimal headless mode) |
 | `SYSTOWER_UI_PORT` | `8080` | Port for Web UI dashboard |
-| `SYSTOWER_AUTH_USERNAME` | `""` | Username for basic web authentication (alias: `USERNAME`) |
-| `SYSTOWER_AUTH_PASSWORD` | `""` | Password for basic web authentication (alias: `PASSWORD`) |
+| `USERNAME` | `""` | Username for web authentication (alias: `SYSTOWER_AUTH_USERNAME`) |
+| `PASSWORD` | `""` | Password for web authentication (alias: `SYSTOWER_AUTH_PASSWORD`) |
 | `SYSTOWER_OIDC_ENABLED` | `false` | Enable OIDC Single Sign-On |
 | `SYSTOWER_OIDC_ISSUER` | `""` | OIDC Issuer discovery URL |
 | `SYSTOWER_OIDC_CLIENT_ID` | `""` | OIDC Client ID |
