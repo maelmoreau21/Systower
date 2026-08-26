@@ -18,7 +18,6 @@ RUN apk add --no-cache \
     bash \
     curl \
     docker-cli \
-    docker-cli-compose \
     jq \
     nodejs \
     npm \

@@ -360,8 +360,7 @@ init_config_file() {
         "cleanup": $(is_true "${SYSTOWER_DOCKER_CLEANUP:-true}" && echo "true" || echo "false"),
         "stopTimeout": ${SYSTOWER_DOCKER_STOP_TIMEOUT:-30},
         "monitorOnly": $(is_true "${SYSTOWER_DOCKER_MONITOR_ONLY:-false}" && echo "true" || echo "false"),
-        "healthcheckTimeout": ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30},
-        "composeAware": $(is_true "${SYSTOWER_DOCKER_COMPOSE_AWARE:-true}" && echo "true" || echo "false")
+        "healthcheckTimeout": ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}
     },
     "system": {
         "enabled": $(is_true "${SYSTOWER_SYSTEM_ENABLED:-false}" && echo "true" || echo "false"),
@@ -397,7 +396,6 @@ load_defaults() {
     export SYSTOWER_DOCKER_STOP_TIMEOUT="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     export SYSTOWER_DOCKER_MONITOR_ONLY="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
     export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
-    export SYSTOWER_DOCKER_COMPOSE_AWARE="${SYSTOWER_DOCKER_COMPOSE_AWARE:-true}"
     export SYSTOWER_SYSTEM_HOSTS="${SYSTOWER_SYSTEM_HOSTS:-}"
     export SYSTOWER_SYSTEM_HOSTS_FILE="${SYSTOWER_SYSTEM_HOSTS_FILE:-/config/hosts.conf}"
     export SYSTOWER_SYSTEM_SSH_KEY="${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}"
@@ -412,6 +410,8 @@ load_defaults() {
     export SYSTOWER_NOTIFY_WEBHOOK="${SYSTOWER_NOTIFY_WEBHOOK:-}"
     export SYSTOWER_UI_ENABLED="${SYSTOWER_UI_ENABLED:-true}"
     export SYSTOWER_UI_PORT="${SYSTOWER_UI_PORT:-8080}"
+    export SYSTOWER_AUTH_USERNAME="${SYSTOWER_AUTH_USERNAME:-${USERNAME:-}}"
+    export SYSTOWER_AUTH_PASSWORD="${SYSTOWER_AUTH_PASSWORD:-${PASSWORD:-}}"
     export SYSTOWER_OIDC_ENABLED="${SYSTOWER_OIDC_ENABLED:-false}"
     export SYSTOWER_OIDC_ISSUER="${SYSTOWER_OIDC_ISSUER:-}"
     export SYSTOWER_OIDC_CLIENT_ID="${SYSTOWER_OIDC_CLIENT_ID:-}"
@@ -431,7 +431,6 @@ load_defaults() {
         val=$(read_config '.docker.stopTimeout'); [ -n "$val" ] && export SYSTOWER_DOCKER_STOP_TIMEOUT="$val"
         val=$(read_config '.docker.monitorOnly'); [ -n "$val" ] && export SYSTOWER_DOCKER_MONITOR_ONLY="$val"
         val=$(read_config '.docker.healthcheckTimeout'); [ -n "$val" ] && export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="$val"
-        val=$(read_config '.docker.composeAware'); [ -n "$val" ] && export SYSTOWER_DOCKER_COMPOSE_AWARE="$val"
         val=$(read_config '.system.enabled'); [ -n "$val" ] && export SYSTOWER_SYSTEM_ENABLED="$val"
         val=$(read_config '.system.reboot'); [ -n "$val" ] && export SYSTOWER_SYSTEM_REBOOT="$val"
         val=$(read_config '.notifications.enabled'); [ -n "$val" ] && export SYSTOWER_NOTIFY_ENABLED="$val"
@@ -458,7 +457,6 @@ print_config() {
         log_info "  Docker stop timeout:   ${SYSTOWER_DOCKER_STOP_TIMEOUT}s"
         log_info "  Docker monitor only:   ${SYSTOWER_DOCKER_MONITOR_ONLY}"
         log_info "  Docker healthcheck:    ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT}s"
-        log_info "  Docker compose aware:  ${SYSTOWER_DOCKER_COMPOSE_AWARE}"
     fi
 
     if is_true "$SYSTOWER_SYSTEM_ENABLED"; then
