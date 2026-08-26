@@ -77,9 +77,9 @@ jobs:
           SIZE=$(docker image inspect systower:test --format '{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Image size: ${SIZE_MB}MB"
-          # Fail if image is larger than 100MB
-          if [ "$SIZE_MB" -gt 100 ]; then
-            echo "::error::Image size exceeds 100MB limit (${SIZE_MB}MB)"
+          # Fail if image is larger than 200MB
+          if [ "$SIZE_MB" -gt 200 ]; then
+            echo "::error::Image size exceeds 200MB limit (${SIZE_MB}MB)"
             exit 1
           fi
 

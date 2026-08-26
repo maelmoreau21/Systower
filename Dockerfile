@@ -1,19 +1,19 @@
 # ============================================================================
 # Systower — Ultra-lightweight Docker Image (v2)
 # ============================================================================
-# Based on Alpine Linux with Node.js Web UI & OIDC SSO.
-# Includes: docker-cli, openssh-client, jq, bash, curl, nodejs, npm
+# Based on Alpine Linux with Node.js Web UI, OIDC SSO & Password Auth.
+# Includes: docker-cli, openssh-client, jq, bash, curl, nodejs
 # ============================================================================
 
 FROM alpine:3.20
 
 LABEL maintainer="Mael"
 LABEL org.opencontainers.image.title="Systower"
-LABEL org.opencontainers.image.description="Lightweight Docker container and system updater with Web UI & OIDC SSO — an improved Watchtower alternative"
+LABEL org.opencontainers.image.description="Lightweight Docker container and system updater with Web UI, OIDC SSO & Password Auth — an improved Watchtower alternative"
 LABEL org.opencontainers.image.source="https://github.com/Mael/Systower"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install required packages in a single layer to minimize image size
+# Install packages, app dependencies, and clean up build tools in optimized steps
 RUN apk add --no-cache \
     bash \
     curl \
@@ -26,9 +26,13 @@ RUN apk add --no-cache \
     tzdata \
     && mkdir -p /config/ssh /scripts /app /var/log
 
-# Copy web application and install dependencies
+# Copy web application and install production dependencies, then purge npm to save ~40-50MB
 COPY app/ /app/
-RUN cd /app && npm install --omit=dev --no-audit --no-fund
+RUN cd /app \
+    && npm install --omit=dev --no-audit --no-fund \
+    && npm cache clean --force \
+    && apk del npm \
+    && rm -rf /root/.npm /root/.cache /tmp/*
 
 # Copy scripts
 COPY scripts/ /scripts/
@@ -64,6 +68,8 @@ ENV SYSTOWER_CONFIG_FILE="/config/systower.json" \
     SYSTOWER_NOTIFY_WEBHOOK="" \
     SYSTOWER_UI_ENABLED="true" \
     SYSTOWER_UI_PORT="8080" \
+    SYSTOWER_AUTH_USERNAME="" \
+    SYSTOWER_AUTH_PASSWORD="" \
     SYSTOWER_OIDC_ENABLED="false" \
     SYSTOWER_OIDC_ISSUER="" \
     SYSTOWER_OIDC_CLIENT_ID="" \

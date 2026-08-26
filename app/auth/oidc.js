@@ -1,16 +1,34 @@
 const { Issuer, generators } = require('openid-client');
 
 let oidcClient = null;
-let isInitialized = false;
+
+const getAuthCredentials = () => {
+    const user = process.env.SYSTOWER_AUTH_USERNAME || process.env.SYSTOWER_USERNAME || process.env.USERNAME || '';
+    const pass = process.env.SYSTOWER_AUTH_PASSWORD || process.env.SYSTOWER_PASSWORD || process.env.PASSWORD || '';
+    return { user: user.trim(), pass: pass.trim() };
+};
 
 const isOidcEnabled = () => {
     return process.env.SYSTOWER_OIDC_ENABLED === 'true';
 };
 
+const isBasicAuthEnabled = () => {
+    const { user, pass } = getAuthCredentials();
+    return Boolean(user && pass);
+};
+
+const isAuthRequired = () => {
+    return isOidcEnabled() || isBasicAuthEnabled();
+};
+
 async function initOidc() {
     if (!isOidcEnabled()) {
-        console.log('[Auth] OIDC SSO is disabled. Running in open access mode.');
-        isInitialized = true;
+        if (isBasicAuthEnabled()) {
+            const { user } = getAuthCredentials();
+            console.log(`[Auth] Password authentication enabled for user: ${user}`);
+        } else {
+            console.log('[Auth] No authentication configured. Running in open access mode.');
+        }
         return;
     }
 
@@ -34,7 +52,6 @@ async function initOidc() {
             response_types: ['code'],
         });
 
-        isInitialized = true;
         console.log('[Auth] OIDC client initialized successfully.');
     } catch (err) {
         console.error('[Auth] Failed to initialize OIDC client:', err.message);
@@ -51,11 +68,27 @@ function getRedirectUri(req) {
 }
 
 function requireAuth(req, res, next) {
-    if (!isOidcEnabled()) {
+    // If no auth is configured, grant admin access
+    if (!isAuthRequired()) {
         req.user = { name: 'Admin', email: 'admin@local', sub: 'local-admin' };
         return next();
     }
 
+    // Check HTTP Basic Auth header (useful for API and automation)
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Basic ') && isBasicAuthEnabled()) {
+        const { user: expectedUser, pass: expectedPass } = getAuthCredentials();
+        const base64Credentials = authHeader.split(' ')[1];
+        const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+        const [username, password] = credentials.split(':');
+
+        if (username === expectedUser && password === expectedPass) {
+            req.user = { name: username, sub: username, isBasic: true };
+            return next();
+        }
+    }
+
+    // Check Session User
     if (req.session && req.session.user) {
         req.user = req.session.user;
         return next();
@@ -63,15 +96,29 @@ function requireAuth(req, res, next) {
 
     // Unauthenticated request
     if (req.path.startsWith('/api/')) {
-        return res.status(401).json({ error: 'Unauthorized', loginUrl: '/auth/login' });
+        const loginUrl = isOidcEnabled() ? '/auth/login' : '/login.html';
+        return res.status(401).json({ error: 'Unauthorized', loginUrl });
     }
 
-    return res.redirect('/auth/login');
+    // Allow public assets on login page
+    if (req.path === '/login.html' || req.path === '/auth/local-login' || req.path.startsWith('/css/') || req.path.startsWith('/js/')) {
+        return next();
+    }
+
+    if (isOidcEnabled()) {
+        return res.redirect('/auth/login');
+    } else {
+        return res.redirect('/login.html');
+    }
 }
 
 function setupAuthRoutes(app) {
+    // OIDC Login
     app.get('/auth/login', (req, res) => {
         if (!isOidcEnabled()) {
+            if (isBasicAuthEnabled()) {
+                return res.redirect('/login.html');
+            }
             return res.redirect('/');
         }
 
@@ -101,6 +148,7 @@ function setupAuthRoutes(app) {
         res.redirect(authorizationUrl);
     });
 
+    // OIDC Callback
     app.get('/auth/callback', async (req, res) => {
         if (!isOidcEnabled()) {
             return res.redirect('/');
@@ -127,7 +175,6 @@ function setupAuthRoutes(app) {
                 picture: claims.picture || null,
             };
 
-            // Clean up temporary auth session data
             delete req.session.code_verifier;
             delete req.session.state;
             delete req.session.nonce;
@@ -139,15 +186,44 @@ function setupAuthRoutes(app) {
         }
     });
 
-    app.get('/auth/logout', (req, res) => {
-        req.session = null;
-        res.redirect('/');
+    // Username / Password Local Login
+    app.post('/auth/local-login', (req, res) => {
+        if (!isBasicAuthEnabled()) {
+            return res.json({ success: true, redirect: '/' });
+        }
+
+        const { username, password } = req.body;
+        const { user: expectedUser, pass: expectedPass } = getAuthCredentials();
+
+        if (username === expectedUser && password === expectedPass) {
+            req.session.user = {
+                sub: username,
+                name: username,
+                email: `${username}@local`,
+                isLocal: true
+            };
+            return res.json({ success: true, redirect: '/' });
+        }
+
+        return res.status(401).json({ success: false, error: 'Invalid username or password' });
     });
 
+    // Logout
+    app.get('/auth/logout', (req, res) => {
+        req.session = null;
+        res.redirect(isBasicAuthEnabled() ? '/login.html' : '/');
+    });
+
+    // Current user info endpoint
     app.get('/auth/user', (req, res) => {
-        if (!isOidcEnabled()) {
+        const oidc = isOidcEnabled();
+        const basic = isBasicAuthEnabled();
+
+        if (!isAuthRequired()) {
             return res.json({
+                authRequired: false,
                 oidcEnabled: false,
+                basicAuthEnabled: false,
                 authenticated: true,
                 user: { name: 'Admin', email: 'admin@local' },
             });
@@ -155,14 +231,18 @@ function setupAuthRoutes(app) {
 
         if (req.session && req.session.user) {
             return res.json({
-                oidcEnabled: true,
+                authRequired: true,
+                oidcEnabled: oidc,
+                basicAuthEnabled: basic,
                 authenticated: true,
                 user: req.session.user,
             });
         }
 
         return res.json({
-            oidcEnabled: true,
+            authRequired: true,
+            oidcEnabled: oidc,
+            basicAuthEnabled: basic,
             authenticated: false,
             user: null,
         });
@@ -174,4 +254,6 @@ module.exports = {
     requireAuth,
     setupAuthRoutes,
     isOidcEnabled,
+    isBasicAuthEnabled,
+    isAuthRequired,
 };

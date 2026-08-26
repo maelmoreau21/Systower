@@ -147,7 +147,8 @@ send_telegram() {
     local emoji
     emoji=$(status_emoji "$status")
 
-    local text="${emoji} *${title}*\n\n${message}\n\n_Systower v${SYSTOWER_VERSION} • $(date '+%Y-%m-%d %H:%M:%S')_"
+    local text
+    text="${emoji} *${title}*\n\n${message}\n\n_Systower v${SYSTOWER_VERSION} • $(date '+%Y-%m-%d %H:%M:%S')_"
 
     if curl -s -o /dev/null -w "%{http_code}" \
         -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
@@ -249,9 +250,13 @@ notify() {
 # Convenience functions for common events
 notify_update_success() {
     local container="$1"
-    local old_image="${2:-unknown}"
-    local new_image="${3:-unknown}"
-    notify "Container Updated" "Container *${container}* has been updated successfully." "success"
+    local old_image="${2:-}"
+    local new_image="${3:-}"
+    local msg="Container *${container}* has been updated successfully."
+    if [ -n "$old_image" ] && [ -n "$new_image" ] && [ "$old_image" != "unknown" ]; then
+        msg="Container *${container}* updated from \`${old_image}\` to \`${new_image}\`."
+    fi
+    notify "Container Updated" "$msg" "success"
 }
 
 notify_update_failed() {

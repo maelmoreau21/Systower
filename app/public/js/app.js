@@ -51,7 +51,7 @@ async function initUserProfile() {
             emailEl.textContent = data.user.email || '';
             avatarEl.textContent = (data.user.name || 'U').charAt(0).toUpperCase();
 
-            if (data.oidcEnabled) {
+            if (data.oidcEnabled || data.basicAuthEnabled) {
                 logoutBtn.style.display = 'flex';
             }
         }

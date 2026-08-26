@@ -79,9 +79,25 @@ Access the Web UI at **`http://localhost:8080`**.
 
 ---
 
-## 🔐 OIDC Single Sign-On (SSO)
+## 🔐 Authentication & Security
 
-Systower supports any standard OpenID Connect provider (Authentik, Keycloak, Authelia, Okta, Dex, etc.).
+Systower offers three flexible authentication modes:
+
+### 1. Username & Password (Simple & Secure)
+
+Set credentials via environment variables:
+
+```yaml
+environment:
+  SYSTOWER_AUTH_USERNAME: "admin"   # or USERNAME: "admin"
+  SYSTOWER_AUTH_PASSWORD: "YourStrongPassword" # or PASSWORD: "YourStrongPassword"
+```
+
+When set, the Web UI provides a secure login form, and all API endpoints support **HTTP Basic Auth** (`Authorization: Basic ...`) for automated scripts and curl.
+
+### 2. OIDC Single Sign-On (SSO)
+
+Integrate with any OpenID Connect identity provider (Authentik, Keycloak, Authelia, Okta, Dex, Google Workspace, etc.):
 
 ```yaml
 environment:
@@ -92,7 +108,9 @@ environment:
   SYSTOWER_OIDC_REDIRECT_URI: "https://systower.example.com/auth/callback"
 ```
 
-> **Note:** If `SYSTOWER_OIDC_ENABLED=false` (default), the Web UI runs in open-access mode without login.
+### 3. Open Access Mode (Default)
+
+If neither username/password nor OIDC are configured (`SYSTOWER_OIDC_ENABLED=false`), the Web UI runs without authentication — ideal for isolated home labs or when behind a reverse proxy handling auth (like Traefik ForwardAuth or Nginx Basic Auth).
 
 ---
 
@@ -203,6 +221,8 @@ Supported operating systems:
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot systems if kernel/packages require it |
 | `SYSTOWER_UI_ENABLED` | `true` | Enable Web UI dashboard |
 | `SYSTOWER_UI_PORT` | `8080` | Port for Web UI dashboard |
+| `SYSTOWER_AUTH_USERNAME` | `""` | Username for basic web authentication (alias: `USERNAME`) |
+| `SYSTOWER_AUTH_PASSWORD` | `""` | Password for basic web authentication (alias: `PASSWORD`) |
 | `SYSTOWER_OIDC_ENABLED` | `false` | Enable OIDC Single Sign-On |
 | `SYSTOWER_OIDC_ISSUER` | `""` | OIDC Issuer discovery URL |
 | `SYSTOWER_OIDC_CLIENT_ID` | `""` | OIDC Client ID |

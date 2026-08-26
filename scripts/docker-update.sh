@@ -126,8 +126,13 @@ update_compose_container() {
     fi
 
     # Pull and recreate via compose
-    if docker compose -p "$project" pull "$service" > /dev/null 2>&1 && \
-       docker compose -p "$project" up -d "$service" > /dev/null 2>&1; then
+    local -a compose_cmd=("docker" "compose" "-p" "$project")
+    if [ -n "$work_dir" ] && [ "$work_dir" != "/" ] && [ -d "$work_dir" ]; then
+        compose_cmd+=("--project-directory" "$work_dir")
+    fi
+
+    if "${compose_cmd[@]}" pull "$service" > /dev/null 2>&1 && \
+       "${compose_cmd[@]}" up -d "$service" > /dev/null 2>&1; then
         log_info "  ✅ Compose service '$service' updated via docker compose"
         return 0
     else

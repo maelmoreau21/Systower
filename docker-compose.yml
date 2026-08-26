@@ -47,9 +47,15 @@ services:
       SYSTOWER_SYSTEM_REBOOT: "false"
       # SYSTOWER_SYSTEM_HOSTS: "pi@192.168.1.100,admin@debian.local:2222"
 
-      # Web UI & OIDC Single Sign-On (Authentik, Authelia, Keycloak, Okta, etc.)
+      # Web UI & Authentication
       SYSTOWER_UI_ENABLED: "true"
       SYSTOWER_UI_PORT: "8080"
+
+      # Option A: Simple Username / Password Authentication
+      # SYSTOWER_AUTH_USERNAME: "admin"   # or USERNAME: "admin"
+      # SYSTOWER_AUTH_PASSWORD: "secretpassword" # or PASSWORD: "secretpassword"
+
+      # Option B: OIDC Single Sign-On (Authentik, Authelia, Keycloak, Okta, etc.)
       SYSTOWER_OIDC_ENABLED: "false"
       # SYSTOWER_OIDC_ISSUER: "https://auth.example.com/application/o/systower/"
       # SYSTOWER_OIDC_CLIENT_ID: "systower-client-id"
