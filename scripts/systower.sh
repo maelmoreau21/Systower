@@ -15,6 +15,8 @@ source "${SCRIPT_DIR}/utils.sh"
 source "${SCRIPT_DIR}/docker-update.sh"
 # shellcheck source=system-update.sh
 source "${SCRIPT_DIR}/system-update.sh"
+# shellcheck source=notifications.sh
+source "${SCRIPT_DIR}/notifications.sh"
 
 # ----------------------------------------------------------------------------
 # Main
@@ -36,6 +38,11 @@ main() {
 
     local docker_result=0
     local system_result=0
+
+    export _DOCKER_UPDATED=0
+    export _DOCKER_FAILED=0
+    export _SYSTEM_UPDATED=0
+    export _SYSTEM_FAILED=0
 
     # Run Docker updates
     if is_true "${SYSTOWER_DOCKER_ENABLED:-true}"; then
@@ -68,6 +75,11 @@ main() {
     log_info "  ✅ Systower run completed in ${duration}s"
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     log_info ""
+
+    # Send run summary notification if any updates were attempted
+    if [ "$((_DOCKER_UPDATED + _DOCKER_FAILED + _SYSTEM_UPDATED + _SYSTEM_FAILED))" -gt 0 ]; then
+        notify_run_summary "$_DOCKER_UPDATED" "$_DOCKER_FAILED" "$_SYSTEM_UPDATED" "$_SYSTEM_FAILED" "$duration"
+    fi
 
     # Return non-zero if any engine had errors
     if [ "$docker_result" -ne 0 ] || [ "$system_result" -ne 0 ]; then

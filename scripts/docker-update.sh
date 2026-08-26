@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Systower — Docker Container Update Engine
+# Systower — Docker Container Update Engine (v2)
 # ============================================================================
 # Detects and applies updates to Docker containers by pulling the latest
 # image, comparing IDs, and recreating containers with their original config.
+#
+# v2 features: rollback, health check, compose-aware, label scheduling,
+#              notifications, private registry support
 # ============================================================================
 
 set -euo pipefail
@@ -11,6 +14,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=utils.sh
 source "${SCRIPT_DIR}/utils.sh"
+# shellcheck source=health-check.sh
+source "${SCRIPT_DIR}/health-check.sh"
+# shellcheck source=notifications.sh
+source "${SCRIPT_DIR}/notifications.sh"
 
 # ----------------------------------------------------------------------------
 # Container filtering
@@ -38,6 +45,18 @@ should_update_container() {
         return 1
     fi
 
+    # Check label-based schedule: systower.schedule
+    local label_schedule
+    label_schedule=$(get_container_label "$container_id" "systower.schedule")
+    if [ -n "$label_schedule" ] && [ "$label_schedule" != "" ]; then
+        # Container has its own schedule — skip during regular runs
+        # (It will be handled by the label-scheduling loop)
+        if [ "${SYSTOWER_LABEL_SCHEDULED_RUN:-false}" != "true" ]; then
+            log_debug "Skipping '$container_name' (has custom schedule: $label_schedule)"
+            return 1
+        fi
+    fi
+
     # Check include-only list (takes priority over exclude list)
     if [ -n "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ]; then
         if ! in_csv_list "$container_name" "$SYSTOWER_DOCKER_INCLUDE_ONLY"; then
@@ -59,7 +78,66 @@ should_update_container() {
 }
 
 # ----------------------------------------------------------------------------
-# Container recreation
+# Docker Compose detection
+# ----------------------------------------------------------------------------
+
+# Check if a container is part of a Docker Compose stack
+# Arguments: $1 - container ID
+# Returns: 0 if compose-managed, 1 if not
+is_compose_container() {
+    local container_id="$1"
+    local project
+    project=$(get_container_label "$container_id" "com.docker.compose.project")
+    [ -n "$project" ] && [ "$project" != "" ]
+}
+
+# Get compose project details
+# Arguments: $1 - container ID
+# Outputs: "project service working_dir" space-separated
+get_compose_info() {
+    local container_id="$1"
+    local project service config_dir
+
+    project=$(get_container_label "$container_id" "com.docker.compose.project")
+    service=$(get_container_label "$container_id" "com.docker.compose.service")
+    config_dir=$(get_container_label "$container_id" "com.docker.compose.project.working_dir")
+
+    echo "$project $service ${config_dir:-/}"
+}
+
+# Update a container via Docker Compose
+# Arguments: $1 - container ID
+# Returns: 0 on success, 1 on failure
+update_compose_container() {
+    local container_id="$1"
+    local container_name
+    container_name=$(get_container_name "$container_id")
+
+    local compose_info
+    compose_info=$(get_compose_info "$container_id")
+    local project service work_dir
+    read -r project service work_dir <<< "$compose_info"
+
+    log_info "  📦 Compose project: $project, service: $service"
+
+    if is_true "${SYSTOWER_DRY_RUN:-false}"; then
+        log_info "  🔍 Dry run: would run 'docker compose pull && up -d' for $service"
+        return 0
+    fi
+
+    # Pull and recreate via compose
+    if docker compose -p "$project" pull "$service" > /dev/null 2>&1 && \
+       docker compose -p "$project" up -d "$service" > /dev/null 2>&1; then
+        log_info "  ✅ Compose service '$service' updated via docker compose"
+        return 0
+    else
+        log_error "  ❌ Failed to update compose service '$service'"
+        return 1
+    fi
+}
+
+# ----------------------------------------------------------------------------
+# Container recreation (non-compose)
 # ----------------------------------------------------------------------------
 
 # Recreate a container with the latest image while preserving config
@@ -73,6 +151,10 @@ recreate_container() {
     image_name=$(get_container_image "$container_id")
 
     log_info "Recreating container '$container_name' with new image..."
+
+    # Save the old image ID for rollback
+    local old_image_id
+    old_image_id=$(get_running_image_id "$container_id")
 
     # Extract full container configuration using docker inspect
     local inspect_json
@@ -143,7 +225,6 @@ recreate_container() {
     ' 2>/dev/null || echo "")
     while IFS= read -r mount; do
         if [ -n "$mount" ]; then
-            # Check it's not already in binds
             if ! echo "$binds" | grep -q "$mount"; then
                 run_args+=("-v" "$mount")
             fi
@@ -160,12 +241,12 @@ recreate_container() {
     done <<< "$labels"
 
     # Hostname
-    local hostname
-    hostname=$(echo "$inspect_json" | jq -r '.[0].Config.Hostname // empty' 2>/dev/null || echo "")
+    local hostname_val
+    hostname_val=$(echo "$inspect_json" | jq -r '.[0].Config.Hostname // empty' 2>/dev/null || echo "")
     local domainname
     domainname=$(echo "$inspect_json" | jq -r '.[0].Config.Domainname // empty' 2>/dev/null || echo "")
-    if [ -n "$hostname" ]; then
-        run_args+=("--hostname" "$hostname")
+    if [ -n "$hostname_val" ]; then
+        run_args+=("--hostname" "$hostname_val")
     fi
     if [ -n "$domainname" ]; then
         run_args+=("--domainname" "$domainname")
@@ -198,9 +279,6 @@ recreate_container() {
     if [ "$network_mode" != "default" ] && [ "$network_mode" != "bridge" ]; then
         run_args+=("--network" "$network_mode")
     fi
-
-    # Additional networks will be connected after container start
-    # (Docker only allows one --network flag during `docker run`)
 
     # PID mode
     local pid_mode
@@ -243,9 +321,26 @@ recreate_container() {
     local cmd
     cmd=$(echo "$inspect_json" | jq -r '.[0].Config.Cmd // [] | .[]' 2>/dev/null || echo "")
 
+    # Execute pre-update hook if defined via label
+    local pre_update_cmd
+    pre_update_cmd=$(get_container_label "$container_id" "systower.pre-update")
+    if [ -n "$pre_update_cmd" ] && [ "$pre_update_cmd" != "" ]; then
+        log_info "  🔧 Running pre-update hook: $pre_update_cmd"
+        docker exec "$container_id" sh -c "$pre_update_cmd" 2>/dev/null || \
+            log_warn "  Pre-update hook failed (continuing anyway)"
+    fi
+
+    # Get custom stop timeout from label
+    local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT}"
+    local label_timeout
+    label_timeout=$(get_container_label "$container_id" "systower.stop-timeout")
+    if [ -n "$label_timeout" ] && [ "$label_timeout" != "" ]; then
+        stop_timeout="$label_timeout"
+    fi
+
     # Stop the running container
-    log_info "Stopping container '$container_name' (timeout: ${SYSTOWER_DOCKER_STOP_TIMEOUT}s)..."
-    if ! docker stop -t "${SYSTOWER_DOCKER_STOP_TIMEOUT}" "$container_id" > /dev/null 2>&1; then
+    log_info "Stopping container '$container_name' (timeout: ${stop_timeout}s)..."
+    if ! docker stop -t "${stop_timeout}" "$container_id" > /dev/null 2>&1; then
         log_error "Failed to stop container '$container_name'"
         return 1
     fi
@@ -254,7 +349,6 @@ recreate_container() {
     log_info "Removing old container '$container_name'..."
     if ! docker rm "$container_id" > /dev/null 2>&1; then
         log_error "Failed to remove container '$container_name'"
-        # Try to restart the old one
         docker start "$container_id" > /dev/null 2>&1 || true
         return 1
     fi
@@ -262,19 +356,15 @@ recreate_container() {
     # Start the new container
     log_info "Starting new container '$container_name'..."
 
-    # Build the full command
     local -a full_cmd=("docker" "run" "-d")
     full_cmd+=("${run_args[@]}")
 
-    # Custom entrypoint
     if [ -n "$entrypoint" ]; then
         full_cmd+=("--entrypoint" "$entrypoint")
     fi
 
-    # Image
     full_cmd+=("$image_name")
 
-    # CMD arguments
     if [ -n "$cmd" ]; then
         while IFS= read -r arg; do
             if [ -n "$arg" ]; then
@@ -284,7 +374,7 @@ recreate_container() {
     fi
 
     if "${full_cmd[@]}" > /dev/null 2>&1; then
-        # Reconnect to additional networks (beyond the primary one)
+        # Reconnect to additional networks
         if [ -n "$extra_networks" ]; then
             while IFS= read -r net; do
                 if [ -n "$net" ] && [ "$net" != "$network_mode" ]; then
@@ -294,11 +384,78 @@ recreate_container() {
                 fi
             done <<< "$extra_networks"
         fi
+
+        # Health check
+        if ! check_container_health "$container_name" "${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"; then
+            log_error "❌ Health check failed for '$container_name' — rolling back..."
+            notify_rollback "$container_name" "Health check failed after update"
+
+            # ROLLBACK: stop new container, recreate with old image
+            docker stop -t 10 "$container_name" > /dev/null 2>&1 || true
+            docker rm "$container_name" > /dev/null 2>&1 || true
+
+            # Recreate with old image
+            full_cmd=("docker" "run" "-d")
+            full_cmd+=("${run_args[@]}")
+            if [ -n "$entrypoint" ]; then
+                full_cmd+=("--entrypoint" "$entrypoint")
+            fi
+            # Use old image by tag — pull from the saved ID
+            docker tag "$old_image_id" "${image_name}:systower-rollback" 2>/dev/null || true
+            full_cmd+=("$old_image_id")
+            if [ -n "$cmd" ]; then
+                while IFS= read -r arg; do
+                    [ -n "$arg" ] && full_cmd+=("$arg")
+                done <<< "$cmd"
+            fi
+
+            if "${full_cmd[@]}" > /dev/null 2>&1; then
+                log_warn "🔄 Rolled back '$container_name' to previous image"
+            else
+                log_error "❌ Rollback also failed for '$container_name'!"
+            fi
+            return 1
+        fi
+
+        # Execute post-update hook if defined via label
+        local post_update_cmd
+        post_update_cmd=$(get_container_label "$container_name" "systower.post-update")
+        if [ -n "$post_update_cmd" ] && [ "$post_update_cmd" != "" ]; then
+            log_info "  🔧 Running post-update hook: $post_update_cmd"
+            docker exec "$container_name" sh -c "$post_update_cmd" 2>/dev/null || \
+                log_warn "  Post-update hook failed"
+        fi
+
         log_info "✅ Container '$container_name' successfully updated!"
+        notify_update_success "$container_name"
         return 0
     else
         log_error "❌ Failed to start new container '$container_name'"
         log_error "Command was: ${full_cmd[*]}"
+        notify_update_failed "$container_name" "Failed to start with new image"
+
+        # ROLLBACK: try to start with old image
+        log_warn "🔄 Attempting rollback for '$container_name'..."
+        docker rm "$container_name" > /dev/null 2>&1 || true
+
+        full_cmd=("docker" "run" "-d")
+        full_cmd+=("${run_args[@]}")
+        if [ -n "$entrypoint" ]; then
+            full_cmd+=("--entrypoint" "$entrypoint")
+        fi
+        full_cmd+=("$old_image_id")
+        if [ -n "$cmd" ]; then
+            while IFS= read -r arg; do
+                [ -n "$arg" ] && full_cmd+=("$arg")
+            done <<< "$cmd"
+        fi
+
+        if "${full_cmd[@]}" > /dev/null 2>&1; then
+            log_warn "🔄 Rolled back '$container_name' to previous image"
+            notify_rollback "$container_name" "New image failed to start"
+        else
+            log_error "❌ Rollback also failed for '$container_name'!"
+        fi
         return 1
     fi
 }
@@ -371,7 +528,7 @@ run_docker_updates() {
 
         log_info "  ↑ Update available for '$container_name'"
 
-        # Monitor-only mode: just report, don't update
+        # Monitor-only mode
         if is_true "${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"; then
             log_info "  👁 Monitor mode: update detected but not applied."
             updated=$((updated + 1))
@@ -388,8 +545,15 @@ run_docker_updates() {
         # Store old image ID for cleanup
         local old_image_id="$running_id"
 
-        # Recreate the container
-        if recreate_container "$container_id"; then
+        # Choose update strategy: Compose-aware or manual recreation
+        local update_result=0
+        if is_true "${SYSTOWER_DOCKER_COMPOSE_AWARE:-true}" && is_compose_container "$container_id"; then
+            update_compose_container "$container_id" || update_result=1
+        else
+            recreate_container "$container_id" || update_result=1
+        fi
+
+        if [ "$update_result" -eq 0 ]; then
             updated=$((updated + 1))
 
             # Clean up old image
@@ -412,6 +576,10 @@ run_docker_updates() {
     log_info "  Skipped:            $skipped"
     log_info "  Failed:             $failed"
     log_info ""
+
+    # Export for summary notification
+    export _DOCKER_UPDATED="$updated"
+    export _DOCKER_FAILED="$failed"
 
     [ "$failed" -eq 0 ]
 }

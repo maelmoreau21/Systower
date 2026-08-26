@@ -1,7 +1,7 @@
 # ============================================================================
-# Systower — Docker Compose Example
+# Systower v2 — Docker Compose Example
 # ============================================================================
-# Ready-to-use configuration. Adjust environment variables as needed.
+# Ready-to-use configuration with Web UI and OIDC SSO support.
 # ============================================================================
 
 services:
@@ -9,37 +9,57 @@ services:
     image: ghcr.io/mael/systower:latest
     container_name: systower
     restart: unless-stopped
+    ports:
+      - "8080:8080" # Web UI Dashboard
     volumes:
       # Required: Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+      # Persistent configuration (settings, hosts, exclusions edited from Web UI)
+      - ./config:/config
+
       # Optional: SSH key for system updates
       # - ~/.ssh/id_rsa:/config/ssh/id_rsa:ro
 
-      # Optional: Hosts configuration file
-      # - ./hosts.conf:/config/hosts.conf:ro
+      # Optional: Private Docker registries credentials
+      # - ~/.docker/config.json:/root/.docker/config.json:ro
 
     environment:
-      # Schedule: Run every day at 4 AM
+      # General Schedule (Cron)
       SYSTOWER_CRON: "0 4 * * *"
-
-      # Run a check immediately when the container starts
       SYSTOWER_RUN_ON_START: "true"
-
-      # Docker container updates
-      SYSTOWER_DOCKER_ENABLED: "true"
-      # SYSTOWER_DOCKER_EXCLUDE: "postgres,redis"
-      # SYSTOWER_DOCKER_INCLUDE_ONLY: ""
-      SYSTOWER_DOCKER_CLEANUP: "true"
-      SYSTOWER_DOCKER_STOP_TIMEOUT: "30"
-      SYSTOWER_DOCKER_MONITOR_ONLY: "false"
-
-      # System updates (disabled by default)
-      SYSTOWER_SYSTEM_ENABLED: "false"
-      # SYSTOWER_SYSTEM_HOSTS: "pi@192.168.1.100,admin@debian.local:2222"
-      SYSTOWER_SYSTEM_REBOOT: "false"
-
-      # General
       SYSTOWER_LOG_LEVEL: "info"
       SYSTOWER_DRY_RUN: "false"
       TZ: "Europe/Paris"
+
+      # Docker Container Updates
+      SYSTOWER_DOCKER_ENABLED: "true"
+      SYSTOWER_DOCKER_CLEANUP: "true"
+      SYSTOWER_DOCKER_STOP_TIMEOUT: "30"
+      SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT: "30"
+      SYSTOWER_DOCKER_COMPOSE_AWARE: "true"
+      SYSTOWER_DOCKER_MONITOR_ONLY: "false"
+      # SYSTOWER_DOCKER_EXCLUDE: "postgres,redis"
+      # SYSTOWER_DOCKER_INCLUDE_ONLY: ""
+
+      # System Updates via SSH (Debian, Ubuntu, Raspberry Pi OS, Alpine)
+      SYSTOWER_SYSTEM_ENABLED: "false"
+      SYSTOWER_SYSTEM_REBOOT: "false"
+      # SYSTOWER_SYSTEM_HOSTS: "pi@192.168.1.100,admin@debian.local:2222"
+
+      # Web UI & OIDC Single Sign-On (Authentik, Authelia, Keycloak, Okta, etc.)
+      SYSTOWER_UI_ENABLED: "true"
+      SYSTOWER_UI_PORT: "8080"
+      SYSTOWER_OIDC_ENABLED: "false"
+      # SYSTOWER_OIDC_ISSUER: "https://auth.example.com/application/o/systower/"
+      # SYSTOWER_OIDC_CLIENT_ID: "systower-client-id"
+      # SYSTOWER_OIDC_CLIENT_SECRET: "your-client-secret"
+      # SYSTOWER_OIDC_REDIRECT_URI: "https://systower.example.com/auth/callback"
+
+      # Multi-Channel Notifications
+      SYSTOWER_NOTIFY_ENABLED: "false"
+      # SYSTOWER_NOTIFY_DISCORD: "https://discord.com/api/webhooks/..."
+      # SYSTOWER_NOTIFY_SLACK: "https://hooks.slack.com/services/..."
+      # SYSTOWER_NOTIFY_TELEGRAM_TOKEN: "123456:ABC-DEF..."
+      # SYSTOWER_NOTIFY_TELEGRAM_CHAT: "-100123456789"
+      # SYSTOWER_NOTIFY_WEBHOOK: "https://automation.example.com/webhook"

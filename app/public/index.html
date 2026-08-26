@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Systower — Docker & System Update Manager</title>
+    <meta name="description" content="Modern lightweight dashboard for automated Docker container and system updates.">
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app" class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                </div>
+                <div class="brand-info">
+                    <span class="brand-name">Systower</span>
+                    <span class="brand-version">v2.0.0</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="containers" id="nav-containers">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    </svg>
+                    <span>Containers</span>
+                    <span class="badge" id="container-count-badge">0</span>
+                </button>
+
+                <button class="nav-item" data-tab="system" id="nav-system">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                        <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                        <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                    <span>System Hosts</span>
+                    <span class="badge" id="host-count-badge">0</span>
+                </button>
+
+                <button class="nav-item" data-tab="settings" id="nav-settings">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <span>Configuration</span>
+                </button>
+
+                <button class="nav-item" data-tab="notifications" id="nav-notifications">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                    </svg>
+                    <span>Notifications</span>
+                </button>
+
+                <button class="nav-item" data-tab="logs" id="nav-logs">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    <span>Live Logs</span>
+                    <span class="live-dot"></span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-card" id="user-profile-card">
+                    <div class="avatar" id="user-avatar">A</div>
+                    <div class="user-details">
+                        <div class="user-name" id="user-display-name">Admin</div>
+                        <div class="user-email" id="user-display-email">admin@local</div>
+                    </div>
+                    <a href="/auth/logout" class="logout-btn" id="btn-logout" title="Sign out" style="display: none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                    </a>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header bar -->
+            <header class="topbar">
+                <div class="page-title-group">
+                    <h1 class="page-title" id="page-title">Docker Containers</h1>
+                    <p class="page-subtitle" id="page-subtitle">Monitor and update containers running on this Docker engine</p>
+                </div>
+
+                <div class="topbar-actions">
+                    <div class="status-indicator">
+                        <span class="pulse-dot"></span>
+                        <span class="status-text">Daemon Active</span>
+                    </div>
+                    <button class="btn btn-primary" id="btn-trigger-all">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                        </svg>
+                        <span>Run Updates Now</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Alerts Container -->
+            <div id="toast-container" class="toast-container"></div>
+
+            <!-- TAB 1: Containers -->
+            <section id="tab-containers" class="tab-pane active">
+                <div class="toolbar">
+                    <div class="search-box">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="container-search" placeholder="Search by name, image, or stack...">
+                    </div>
+                    <div class="filter-group">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="active">Active</button>
+                        <button class="filter-btn" data-filter="excluded">Excluded</button>
+                        <button class="filter-btn" data-filter="compose">Compose Stacks</button>
+                    </div>
+                    <button class="btn btn-secondary btn-icon" id="btn-refresh-containers" title="Refresh list">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="grid container-grid" id="containers-list">
+                    <!-- Dynamic container cards inserted here -->
+                    <div class="loading-state">Loading containers...</div>
+                </div>
+            </section>
+
+            <!-- TAB 2: System Hosts -->
+            <section id="tab-system" class="tab-pane">
+                <div class="toolbar">
+                    <div class="section-desc">Manage SSH hosts for automated system updates (Debian, Ubuntu, Raspberry Pi OS, Alpine).</div>
+                    <button class="btn btn-primary" id="btn-add-host-modal">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        <span>Add Host</span>
+                    </button>
+                </div>
+
+                <div class="card table-card">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Host Target</th>
+                                <th>Status / OS</th>
+                                <th>SSH Port</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="system-hosts-table">
+                            <tr><td colspan="4" class="empty-state">No remote hosts configured yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- TAB 3: Configuration -->
+            <section id="tab-settings" class="tab-pane">
+                <form id="config-form" class="config-form">
+                    <!-- General Settings -->
+                    <div class="card config-card">
+                        <div class="card-header">
+                            <h2 class="card-title">General Settings</h2>
+                            <p class="card-desc">Scheduler and execution policies</p>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="cfg-cron">Cron Schedule</label>
+                                <input type="text" id="cfg-cron" name="general.cron" value="0 4 * * *" required>
+                                <span class="help-text">Standard 5-part cron syntax (e.g. <code>0 4 * * *</code> = 4:00 AM daily)</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-logLevel">Log Level</label>
+                                <select id="cfg-logLevel" name="general.logLevel">
+                                    <option value="debug">Debug (Verbose)</option>
+                                    <option value="info" selected>Info (Standard)</option>
+                                    <option value="warn">Warn</option>
+                                    <option value="error">Error Only</option>
+                                </select>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-runOnStart" name="general.runOnStart">
+                                    <span class="custom-checkbox"></span>
+                                    <span>Run updates immediately on container startup</span>
+                                </label>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-dryRun" name="general.dryRun">
+                                    <span class="custom-checkbox"></span>
+                                    <span>Dry Run Mode (Simulate without applying updates)</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Docker Engine Settings -->
+                    <div class="card config-card">
+                        <div class="card-header">
+                            <h2 class="card-title">Docker Engine Settings</h2>
+                            <p class="card-desc">Container update behaviors, health checks, and cleanup</p>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-dockerEnabled" name="docker.enabled" checked>
+                                    <span class="custom-checkbox"></span>
+                                    <span>Enable Docker Container Updates</span>
+                                </label>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-dockerCleanup" name="docker.cleanup" checked>
+                                    <span class="custom-checkbox"></span>
+                                    <span>Automatically remove old images after successful update</span>
+                                </label>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-dockerComposeAware" name="docker.composeAware" checked>
+                                    <span class="custom-checkbox"></span>
+                                    <span>Docker Compose aware (Update via Compose project when detected)</span>
+                                </label>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-dockerMonitorOnly" name="docker.monitorOnly">
+                                    <span class="custom-checkbox"></span>
+                                    <span>Monitor Only (Detect updates but do not recreate containers)</span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-stopTimeout">Stop Timeout (Seconds)</label>
+                                <input type="number" id="cfg-stopTimeout" name="docker.stopTimeout" value="30" min="1" max="300">
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-healthcheckTimeout">Health Check Timeout (Seconds)</label>
+                                <input type="number" id="cfg-healthcheckTimeout" name="docker.healthcheckTimeout" value="30" min="5" max="300">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Updates (SSH) -->
+                    <div class="card config-card">
+                        <div class="card-header">
+                            <h2 class="card-title">System Updates (SSH)</h2>
+                            <p class="card-desc">Remote host updates and automated reboots</p>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-systemEnabled" name="system.enabled">
+                                    <span class="custom-checkbox"></span>
+                                    <span>Enable System Updates for SSH hosts</span>
+                                </label>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="cfg-systemReboot" name="system.reboot">
+                                    <span class="custom-checkbox"></span>
+                                    <span>Auto-reboot host if required by packages after update</span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-sshKeyPath">SSH Private Key Path</label>
+                                <input type="text" id="cfg-sshKeyPath" name="system.sshKeyPath" value="/config/ssh/id_rsa">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="btn-save-config">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                            <span>Save Configuration</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- TAB 4: Notifications -->
+            <section id="tab-notifications" class="tab-pane">
+                <div class="notifications-layout">
+                    <!-- Discord -->
+                    <div class="card notif-card">
+                        <div class="notif-header">
+                            <div class="notif-title-group">
+                                <span class="notif-icon discord">🎮</span>
+                                <div>
+                                    <h3 class="card-title">Discord Webhook</h3>
+                                    <p class="card-desc">Post update notifications directly into a Discord channel</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="notif-discord-url">Webhook URL</label>
+                            <input type="url" id="notif-discord-url" placeholder="https://discord.com/api/webhooks/...">
+                        </div>
+                        <button class="btn btn-secondary" onclick="testNotification('discord')">Send Test Message</button>
+                    </div>
+
+                    <!-- Slack -->
+                    <div class="card notif-card">
+                        <div class="notif-header">
+                            <div class="notif-title-group">
+                                <span class="notif-icon slack">💬</span>
+                                <div>
+                                    <h3 class="card-title">Slack Webhook</h3>
+                                    <p class="card-desc">Send structured update summaries to a Slack workspace channel</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="notif-slack-url">Incoming Webhook URL</label>
+                            <input type="url" id="notif-slack-url" placeholder="https://hooks.slack.com/services/...">
+                        </div>
+                        <button class="btn btn-secondary" onclick="testNotification('slack')">Send Test Message</button>
+                    </div>
+
+                    <!-- Telegram -->
+                    <div class="card notif-card">
+                        <div class="notif-header">
+                            <div class="notif-title-group">
+                                <span class="notif-icon telegram">✈️</span>
+                                <div>
+                                    <h3 class="card-title">Telegram Bot</h3>
+                                    <p class="card-desc">Instant alerts sent to your Telegram private chat or channel</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="notif-telegram-token">Bot Token</label>
+                                <input type="password" id="notif-telegram-token" placeholder="123456789:ABCdefGHIjklMNO...">
+                            </div>
+                            <div class="form-group">
+                                <label for="notif-telegram-chat">Chat ID</label>
+                                <input type="text" id="notif-telegram-chat" placeholder="-100123456789 or @channel">
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary" onclick="testNotification('telegram')">Send Test Message</button>
+                    </div>
+
+                    <!-- Generic Webhook -->
+                    <div class="card notif-card">
+                        <div class="notif-header">
+                            <div class="notif-title-group">
+                                <span class="notif-icon webhook">🌐</span>
+                                <div>
+                                    <h3 class="card-title">Generic Webhook</h3>
+                                    <p class="card-desc">HTTP POST JSON payload to custom automation endpoints (Home Assistant, n8n, etc.)</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="notif-webhook-url">Endpoint URL</label>
+                            <input type="url" id="notif-webhook-url" placeholder="https://automation.example.com/api/webhook">
+                        </div>
+                        <button class="btn btn-secondary" onclick="testNotification('webhook')">Send Test Message</button>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-primary" id="btn-save-notifications">Save Notification Settings</button>
+                </div>
+            </section>
+
+            <!-- TAB 5: Live Logs -->
+            <section id="tab-logs" class="tab-pane">
+                <div class="logs-toolbar">
+                    <div class="source-selector">
+                        <button class="log-source-btn active" data-source="systower">Engine Logs (systower.log)</button>
+                        <button class="log-source-btn" data-source="ui">Web UI Logs (systower-ui.log)</button>
+                    </div>
+                    <div class="logs-actions">
+                        <label class="checkbox-label auto-scroll-label">
+                            <input type="checkbox" id="log-auto-scroll" checked>
+                            <span class="custom-checkbox"></span>
+                            <span>Auto Scroll</span>
+                        </label>
+                        <button class="btn btn-secondary btn-sm" id="btn-clear-logs">Clear View</button>
+                    </div>
+                </div>
+                <div class="terminal-window" id="terminal-window">
+                    <pre class="terminal-content" id="log-output">Connecting to log stream...</pre>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Add Host Modal -->
+    <div class="modal-backdrop" id="add-host-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Remote SSH Host</h3>
+                <button class="modal-close" onclick="closeAddHostModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="modal-host-input">Host String</label>
+                    <input type="text" id="modal-host-input" placeholder="user@hostname:port (e.g. pi@192.168.1.100:22)">
+                    <span class="help-text">Port is optional (defaults to 22). Remote user must have sudo access for apt/apk.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAddHostModal()">Cancel</button>
+                <button class="btn btn-primary" id="btn-save-new-host">Add Host</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inspect Container Modal -->
+    <div class="modal-backdrop" id="inspect-modal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title" id="inspect-modal-title">Container Inspection</h3>
+                <button class="modal-close" onclick="closeInspectModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre class="json-viewer" id="inspect-json-content">Loading...</pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeInspectModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

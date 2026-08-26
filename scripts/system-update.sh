@@ -11,6 +11,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=utils.sh
 source "${SCRIPT_DIR}/utils.sh"
+# shellcheck source=notifications.sh
+source "${SCRIPT_DIR}/notifications.sh"
 
 # ----------------------------------------------------------------------------
 # SSH execution
@@ -96,6 +98,7 @@ update_remote_host() {
     # Test connectivity
     if ! test_ssh_connection "$user" "$host" "$port"; then
         log_error "Cannot connect to $host_display"
+        notify_system_update "$host_display" "error"
         return 1
     fi
 
@@ -119,6 +122,7 @@ update_remote_host() {
             ;;
         *)
             log_warn "  Unsupported OS type: $os_type. Skipping $host_display."
+            notify_system_update "$host_display" "error"
             return 1
             ;;
     esac
@@ -136,9 +140,11 @@ update_remote_host() {
     if output=$(ssh_exec "$user" "$host" "$port" "$update_cmd" 2>&1); then
         log_info "  ✅ System update completed on $host_display"
         log_debug "  Output: $output"
+        notify_system_update "$host_display" "success"
     else
         log_error "  ❌ System update failed on $host_display"
         log_error "  Output: $output"
+        notify_system_update "$host_display" "error"
         return 1
     fi
 
@@ -167,7 +173,7 @@ update_remote_host() {
 # Main update loop
 # ----------------------------------------------------------------------------
 
-# Collect all hosts from environment variable and hosts file
+# Collect all hosts from environment variable, hosts file, and JSON config
 collect_hosts() {
     local hosts=()
 
@@ -176,6 +182,16 @@ collect_hosts() {
         while IFS= read -r host; do
             [ -n "$host" ] && hosts+=("$host")
         done < <(split_csv "$SYSTOWER_SYSTEM_HOSTS")
+    fi
+
+    # Hosts from JSON config file
+    local config_file="${SYSTOWER_CONFIG_FILE:-/config/systower.json}"
+    if [ -f "$config_file" ]; then
+        local json_hosts
+        json_hosts=$(jq -r '.system.hosts[]? | if type == "string" then . else (.user + "@" + .host + (if .port then ":" + (.port|tostring) else "" end)) end' "$config_file" 2>/dev/null || echo "")
+        while IFS= read -r host; do
+            [ -n "$host" ] && hosts+=("$host")
+        done <<< "$json_hosts"
     fi
 
     # Hosts from file
@@ -211,7 +227,7 @@ run_system_updates() {
 
     if [ ${#all_hosts[@]} -eq 0 ]; then
         log_warn "No hosts configured for system updates."
-        log_warn "Set SYSTOWER_SYSTEM_HOSTS or mount a hosts file."
+        log_warn "Set SYSTOWER_SYSTEM_HOSTS, configure hosts in UI, or mount a hosts file."
         return 0
     fi
 
@@ -242,6 +258,9 @@ run_system_updates() {
     log_info "  Updated:        $updated"
     log_info "  Failed:         $failed"
     log_info ""
+
+    export _SYSTEM_UPDATED="$updated"
+    export _SYSTEM_FAILED="$failed"
 
     [ "$failed" -eq 0 ]
 }

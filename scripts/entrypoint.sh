@@ -67,6 +67,19 @@ main() {
     # Setup cron schedule
     setup_cron
 
+    # Start Web UI if enabled
+    local web_pid=""
+    if is_true "${SYSTOWER_UI_ENABLED:-true}"; then
+        if [ -d "/app" ] && [ -f "/app/server.js" ]; then
+            log_info "Starting Web UI on port ${SYSTOWER_UI_PORT:-8080}..."
+            node /app/server.js >> /var/log/systower-ui.log 2>&1 &
+            web_pid=$!
+            log_info "Web UI started (PID: $web_pid)"
+        else
+            log_warn "Web UI files not found at /app"
+        fi
+    fi
+
     # Run immediately on start if configured
     if is_true "${SYSTOWER_RUN_ON_START}"; then
         log_info "Running initial update cycle..."
@@ -86,7 +99,7 @@ main() {
     local crond_pid=$!
 
     # Handle graceful shutdown
-    trap 'log_info "Shutting down Systower..."; kill $crond_pid $tail_pid 2>/dev/null; exit 0' SIGTERM SIGINT
+    trap 'log_info "Shutting down Systower..."; kill $crond_pid $tail_pid $web_pid 2>/dev/null; exit 0' SIGTERM SIGINT
 
     # Tail log file to stdout so `docker logs` works
     tail -f /var/log/systower.log &

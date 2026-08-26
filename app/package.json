@@ -1,0 +1,17 @@
+{
+  "name": "systower-ui",
+  "version": "2.0.0",
+  "description": "Web UI dashboard & management for Systower",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "cookie-session": "^2.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "openid-client": "^5.6.5",
+    "ws": "^8.17.1"
+  }
+}
