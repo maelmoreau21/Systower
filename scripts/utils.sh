@@ -24,6 +24,7 @@ if [ -t 1 ] || [ "${SYSTOWER_FORCE_COLOR:-false}" = "true" ]; then
     readonly COLOR_RED='\033[0;31m'
     readonly COLOR_GREEN='\033[0;32m'
     readonly COLOR_YELLOW='\033[0;33m'
+    # shellcheck disable=SC2034 # COLOR_BLUE is part of the color palette, available to consumers
     readonly COLOR_BLUE='\033[0;34m'
     readonly COLOR_PURPLE='\033[0;35m'
     readonly COLOR_CYAN='\033[0;36m'
@@ -34,6 +35,7 @@ else
     readonly COLOR_RED=''
     readonly COLOR_GREEN=''
     readonly COLOR_YELLOW=''
+    # shellcheck disable=SC2034
     readonly COLOR_BLUE=''
     readonly COLOR_PURPLE=''
     readonly COLOR_CYAN=''

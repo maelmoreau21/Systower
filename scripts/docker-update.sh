@@ -78,9 +78,9 @@ recreate_container() {
     local inspect_json
     inspect_json=$(docker inspect "$container_id")
 
-    # Extract network settings
-    local networks
-    networks=$(echo "$inspect_json" | jq -r '.[0].NetworkSettings.Networks | keys[]' 2>/dev/null || echo "")
+    # Extract network settings (used later to reconnect after recreation)
+    local extra_networks
+    extra_networks=$(echo "$inspect_json" | jq -r '.[0].NetworkSettings.Networks | keys[]' 2>/dev/null | grep -v '^bridge$' | grep -v '^host$' | grep -v '^none$' || echo "")
 
     # Build the docker run command arguments
     local -a run_args=()
@@ -192,12 +192,15 @@ recreate_container() {
         run_args+=("--privileged")
     fi
 
-    # Network mode
+    # Network mode (primary network)
     local network_mode
     network_mode=$(echo "$inspect_json" | jq -r '.[0].HostConfig.NetworkMode' 2>/dev/null || echo "default")
     if [ "$network_mode" != "default" ] && [ "$network_mode" != "bridge" ]; then
         run_args+=("--network" "$network_mode")
     fi
+
+    # Additional networks will be connected after container start
+    # (Docker only allows one --network flag during `docker run`)
 
     # PID mode
     local pid_mode
@@ -281,6 +284,16 @@ recreate_container() {
     fi
 
     if "${full_cmd[@]}" > /dev/null 2>&1; then
+        # Reconnect to additional networks (beyond the primary one)
+        if [ -n "$extra_networks" ]; then
+            while IFS= read -r net; do
+                if [ -n "$net" ] && [ "$net" != "$network_mode" ]; then
+                    log_debug "Reconnecting '$container_name' to network '$net'"
+                    docker network connect "$net" "$container_name" 2>/dev/null || \
+                        log_warn "Failed to reconnect to network '$net'"
+                fi
+            done <<< "$extra_networks"
+        fi
         log_info "✅ Container '$container_name' successfully updated!"
         return 0
     else

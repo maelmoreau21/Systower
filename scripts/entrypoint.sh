@@ -86,14 +86,14 @@ main() {
     local crond_pid=$!
 
     # Handle graceful shutdown
-    trap 'log_info "Shutting down Systower..."; kill $crond_pid 2>/dev/null; exit 0' SIGTERM SIGINT
+    trap 'log_info "Shutting down Systower..."; kill $crond_pid $tail_pid 2>/dev/null; exit 0' SIGTERM SIGINT
 
     # Tail log file to stdout so `docker logs` works
     tail -f /var/log/systower.log &
     local tail_pid=$!
 
     # Wait for crond to exit
-    wait $crond_pid
+    wait $crond_pid $tail_pid
 }
 
 main "$@"

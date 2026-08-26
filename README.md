@@ -25,7 +25,7 @@
 - 🔍 **Dry Run** — Preview what would happen without making any changes
 - 🧹 **Auto Cleanup** — Remove old images after updates to save disk space
 - 🪶 **Ultra-Lightweight** — Based on Alpine Linux (~30MB image size)
-- 🔄 **Multi-Architecture** — Supports `amd64` and `arm64` (Raspberry Pi)
+- 🔄 **Multi-Architecture** — Supports `amd64`, `arm64`, `arm/v7`, and `arm/v6` (all Raspberry Pi models)
 
 ## 📊 Comparison with Watchtower
 
@@ -38,7 +38,7 @@
 | Include-only mode | ❌ | ✅ |
 | Monitor-only mode | ✅ | ✅ |
 | Dry run mode | ❌ | ✅ |
-| Raspberry Pi / ARM support | ⚠️ | ✅ |
+| Multi-arch (amd64/arm64/arm/v7/v6) | ⚠️ | ✅ |
 | Auto cleanup old images | ✅ | ✅ |
 | Still maintained (2026+) | ❌ (archived) | ✅ |
 
