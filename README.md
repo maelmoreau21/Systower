@@ -2,15 +2,17 @@
 
 # 🏗️ Systower
 
-**Modern Lightweight Docker Container & System Updater with Web UI & OIDC SSO**
+**Modern Lightweight Docker Container & Local Host System Updater with Web UI**
 
 *An improved, state-of-the-art alternative to Watchtower*
 
-[![Build & Push](https://github.com/Mael/Systower/actions/workflows/build.yml/badge.svg)](https://github.com/Mael/Systower/actions/workflows/build.yml)
-[![Tests & Lint](https://github.com/Mael/Systower/actions/workflows/test.yml/badge.svg)](https://github.com/Mael/Systower/actions/workflows/test.yml)
+[🇬🇧 English](README.md) • [🇫🇷 Français](README.fr.md)
+
+[![Build & Push](https://github.com/maelmoreau21/Systower/actions/workflows/build.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/build.yml)
+[![Tests & Lint](https://github.com/maelmoreau21/Systower/actions/workflows/test.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Docker Image Size](https://img.shields.io/badge/image%20size-~40MB-brightgreen)](https://github.com/Mael/Systower/pkgs/container/systower)
-[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7%20%7C%20armv6-purple)](https://github.com/Mael/Systower)
+[![Docker Image Size](https://img.shields.io/badge/image%20size-~40MB-brightgreen)](https://github.com/maelmoreau21/Systower/pkgs/container/systower)
+[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7%20%7C%20armv6-purple)](https://github.com/maelmoreau21/Systower)
 
 </div>
 
@@ -19,15 +21,13 @@
 ## ✨ Features
 
 - 🐳 **Docker Container Updates** — Pull latest images and recreate containers preserving full configuration (networks, volumes, ports, caps, devices, env, restart policies).
-- 🖥️ **System Updates via SSH** — Remotely update Debian, Ubuntu, Raspberry Pi OS, and Alpine Linux hosts.
-- 🌐 **Modern Web UI Dashboard** — Clean, responsive dark-mode dashboard to view container health, trigger updates, manage hosts, and configure settings.
-- 🔐 **OIDC Single Sign-On (SSO)** — Seamless authentication with Authentik, Authelia, Keycloak, Okta, Google Workspace, etc. (Or run in open access mode).
+- 🖥️ **Local Host System Updates** — Update the host OS directly (Debian, Ubuntu, Raspberry Pi OS, Alpine, Arch, Fedora) with zero SSH configuration needed.
+- 🌐 **Modern Web UI Dashboard (EN / FR)** — Clean, responsive dark-mode dashboard with real-time logs, language switcher (French / English), and one-click manual update triggers.
+- 🔐 **Simple & OIDC Authentication** — Built-in username/password (`USERNAME` / `PASSWORD`) or OpenID Connect SSO (Authentik, Keycloak, Authelia, etc.).
 - 🔔 **Multi-Channel Notifications** — Instant alerts to **Discord**, **Slack**, **Telegram**, and **custom JSON webhooks** on updates, errors, or rollbacks.
-- 🔄 **Automatic Rollback** — If a newly updated container fails health checks or crashes, Systower automatically rolls back to the previous image.
-- 🏥 **Post-Update Health Checks** — Native Docker healthcheck integration and running-state validation before retiring old images.
-- 📦 **Docker Compose Aware** — Detects Compose stacks and updates services gracefully with `docker compose`.
-- 🏷️ **Smart Labels & Per-Container Scheduling** — Configure custom cron schedules, pre/post hooks, and timeouts via container labels.
+- 🔄 **Automatic Rollback** — If a newly updated container fails to start, Systower automatically reverts to the backup container instantaneously.
 - 🧹 **Auto Cleanup** — Remove orphaned and dangling images after successful updates.
+- 🪶 **Ultra-Lightweight Multi-Arch** — Alpine Linux base, using under 5MB RAM in headless mode, supporting `amd64`, `arm64`, `arm/v7`, and `arm/v6` (all Raspberry Pi models).
 - 🔍 **Dry Run & Monitor Modes** — Preview updates or monitor for new versions without applying changes.
 - 🪶 **Ultra-Lightweight Multi-Arch** — Alpine Linux base, supporting `amd64`, `arm64`, `arm/v7`, and `arm/v6` (all Raspberry Pi models).
 

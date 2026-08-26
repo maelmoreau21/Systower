@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Systower — Sign In</title>
+    <title>Systower — Connexion / Sign In</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -16,6 +16,33 @@
             min-height: 100vh;
             background: radial-gradient(circle at center, rgba(99, 102, 241, 0.12), transparent 500px), var(--bg-base);
             padding: 20px;
+            position: relative;
+        }
+        .lang-switch-top {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 6px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            padding: 4px;
+            border-radius: var(--radius-md);
+        }
+        .lang-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 4px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s ease;
+        }
+        .lang-btn.active {
+            background: var(--accent-primary);
+            color: #fff;
         }
         .login-card {
             width: 100%;
@@ -76,6 +103,11 @@
     </style>
 </head>
 <body class="login-page">
+    <div class="lang-switch-top">
+        <button class="lang-btn active" data-lang="fr" onclick="setLang('fr')">🇫🇷 FR</button>
+        <button class="lang-btn" data-lang="en" onclick="setLang('en')">🇬🇧 EN</button>
+    </div>
+
     <div class="login-card">
         <div class="login-header">
             <div class="login-logo">
@@ -85,30 +117,71 @@
                     <polyline points="2 12 12 17 22 12"></polyline>
                 </svg>
             </div>
-            <h1 class="login-title">Sign in to Systower</h1>
-            <p class="login-subtitle">Docker & System Update Manager</p>
+            <h1 class="login-title" id="t-title">Connexion à Systower</h1>
+            <p class="login-subtitle" id="t-subtitle">Gestionnaire de mises à jour Docker & Système</p>
         </div>
 
         <div id="login-error" class="login-error"></div>
 
         <form id="login-form" class="login-form">
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username" id="t-user-label">Nom d'utilisateur</label>
                 <input type="text" id="username" name="username" required autofocus autocomplete="username" placeholder="admin">
             </div>
 
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password" id="t-pass-label">Mot de passe</label>
                 <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
             </div>
 
             <button type="submit" class="btn btn-primary btn-block" id="btn-submit">
-                <span>Sign In</span>
+                <span id="t-submit">Se connecter</span>
             </button>
         </form>
     </div>
 
     <script>
+        const i18n = {
+            fr: {
+                title: "Connexion à Systower",
+                subtitle: "Gestionnaire de mises à jour Docker & Système",
+                userLabel: "Nom d'utilisateur",
+                passLabel: "Mot de passe",
+                submit: "Se connecter",
+                authenticating: "Vérification...",
+                invalidCreds: "Identifiants invalides",
+                networkError: "Erreur réseau ou serveur"
+            },
+            en: {
+                title: "Sign in to Systower",
+                subtitle: "Docker & Host System Update Manager",
+                userLabel: "Username",
+                passLabel: "Password",
+                submit: "Sign In",
+                authenticating: "Authenticating...",
+                invalidCreds: "Invalid username or password",
+                networkError: "Network or server error"
+            }
+        };
+
+        let currentLang = localStorage.getItem('systower_lang') || (navigator.language.startsWith('fr') ? 'fr' : 'en');
+
+        function setLang(lang) {
+            currentLang = lang;
+            localStorage.setItem('systower_lang', lang);
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.lang === lang);
+            });
+            const t = i18n[lang];
+            document.getElementById('t-title').textContent = t.title;
+            document.getElementById('t-subtitle').textContent = t.subtitle;
+            document.getElementById('t-user-label').textContent = t.userLabel;
+            document.getElementById('t-pass-label').textContent = t.passLabel;
+            document.getElementById('t-submit').textContent = t.submit;
+        }
+
+        setLang(currentLang);
+
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const errorEl = document.getElementById('login-error');
@@ -117,9 +190,10 @@
 
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
+            const t = i18n[currentLang];
 
             btn.disabled = true;
-            btn.textContent = 'Authenticating...';
+            btn.textContent = t.authenticating;
 
             try {
                 const res = await fetch('/auth/local-login', {
@@ -132,15 +206,15 @@
                 if (data.success) {
                     window.location.href = data.redirect || '/';
                 } else {
-                    errorEl.textContent = data.error || 'Invalid credentials';
+                    errorEl.textContent = data.error || t.invalidCreds;
                     errorEl.style.display = 'block';
                 }
             } catch (err) {
-                errorEl.textContent = 'Network or server error';
+                errorEl.textContent = t.networkError;
                 errorEl.style.display = 'block';
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Sign In';
+                btn.textContent = t.submit;
             }
         });
     </script>
