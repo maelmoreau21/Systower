@@ -311,94 +311,18 @@ parse_hosts_file() {
 # Environment defaults
 # ----------------------------------------------------------------------------
 
-# Read a value from the JSON config file, with env var fallback
-# Arguments: $1 - jq path (e.g., '.docker.enabled'), $2 - env var fallback value
-# Outputs: the value
-read_config() {
-    local jq_path="$1"
-    local fallback="${2:-}"
-    local config_file="${SYSTOWER_CONFIG_FILE:-/config/systower.json}"
-
-    if [ -f "$config_file" ]; then
-        local val=""
-        if command -v jq >/dev/null 2>&1; then
-            val=$(jq -r "${jq_path} // empty" "$config_file" 2>/dev/null || echo "")
-        elif command -v node >/dev/null 2>&1; then
-            local js_path="${jq_path#.}"
-            val=$(node -e "try { const c = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const p = process.argv[2].split('.'); let cur = c; for (const k of p) cur = cur ? cur[k] : undefined; if (cur !== undefined && cur !== null) console.log(cur); } catch(e){}" "$config_file" "$js_path" 2>/dev/null || echo "")
-        fi
-        if [ -n "$val" ] && [ "$val" != "null" ]; then
-            echo "$val"
-            return
-        fi
-    fi
-    echo "$fallback"
-}
-
-# Initialize config file with current env var values if it doesn't exist
-init_config_file() {
-    local config_file="${SYSTOWER_CONFIG_FILE:-/config/systower.json}"
-    if [ -f "$config_file" ]; then
-        log_debug "Config file exists: $config_file"
-        return 0
-    fi
-
-    log_info "Creating initial config file: $config_file"
-    mkdir -p "$(dirname "$config_file")"
-    cat > "$config_file" << CFGEOF
-{
-    "general": {
-        "cron": "${SYSTOWER_CRON:-0 4 * * *}",
-        "runOnStart": $(is_true "${SYSTOWER_RUN_ON_START:-true}" && echo "true" || echo "false"),
-        "logLevel": "${SYSTOWER_LOG_LEVEL:-info}",
-        "dryRun": $(is_true "${SYSTOWER_DRY_RUN:-false}" && echo "true" || echo "false")
-    },
-    "docker": {
-        "enabled": $(is_true "${SYSTOWER_DOCKER_ENABLED:-true}" && echo "true" || echo "false"),
-        "exclude": [],
-        "includeOnly": [],
-        "cleanup": $(is_true "${SYSTOWER_DOCKER_CLEANUP:-true}" && echo "true" || echo "false"),
-        "stopTimeout": ${SYSTOWER_DOCKER_STOP_TIMEOUT:-30},
-        "monitorOnly": $(is_true "${SYSTOWER_DOCKER_MONITOR_ONLY:-false}" && echo "true" || echo "false"),
-        "healthcheckTimeout": ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}
-    },
-    "system": {
-        "enabled": $(is_true "${SYSTOWER_SYSTEM_ENABLED:-false}" && echo "true" || echo "false"),
-        "hosts": [],
-        "sshKeyPath": "${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}",
-        "reboot": $(is_true "${SYSTOWER_SYSTEM_REBOOT:-false}" && echo "true" || echo "false")
-    },
-    "notifications": {
-        "enabled": $(is_true "${SYSTOWER_NOTIFY_ENABLED:-false}" && echo "true" || echo "false"),
-        "discord": {"enabled": false, "webhookUrl": "${SYSTOWER_NOTIFY_DISCORD:-}"},
-        "slack": {"enabled": false, "webhookUrl": "${SYSTOWER_NOTIFY_SLACK:-}"},
-        "telegram": {"enabled": false, "botToken": "${SYSTOWER_NOTIFY_TELEGRAM_TOKEN:-}", "chatId": "${SYSTOWER_NOTIFY_TELEGRAM_CHAT:-}"},
-        "webhook": {"enabled": false, "url": "${SYSTOWER_NOTIFY_WEBHOOK:-}"}
-    },
-    "ui": {
-        "enabled": $(is_true "${SYSTOWER_UI_ENABLED:-true}" && echo "true" || echo "false"),
-        "port": ${SYSTOWER_UI_PORT:-8080}
-    }
-}
-CFGEOF
-}
-
-# Load default values for all environment variables
+# Read a value from the JSON # Load default values for all environment variables
 load_defaults() {
-    export SYSTOWER_CONFIG_FILE="${SYSTOWER_CONFIG_FILE:-/config/systower.json}"
     export SYSTOWER_CRON="${SYSTOWER_CRON:-0 4 * * *}"
     export SYSTOWER_RUN_ON_START="${SYSTOWER_RUN_ON_START:-true}"
     export SYSTOWER_DOCKER_ENABLED="${SYSTOWER_DOCKER_ENABLED:-true}"
-    export SYSTOWER_SYSTEM_ENABLED="${SYSTOWER_SYSTEM_ENABLED:-false}"
     export SYSTOWER_DOCKER_EXCLUDE="${SYSTOWER_DOCKER_EXCLUDE:-}"
     export SYSTOWER_DOCKER_INCLUDE_ONLY="${SYSTOWER_DOCKER_INCLUDE_ONLY:-}"
     export SYSTOWER_DOCKER_CLEANUP="${SYSTOWER_DOCKER_CLEANUP:-true}"
     export SYSTOWER_DOCKER_STOP_TIMEOUT="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     export SYSTOWER_DOCKER_MONITOR_ONLY="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
     export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
-    export SYSTOWER_SYSTEM_HOSTS="${SYSTOWER_SYSTEM_HOSTS:-}"
-    export SYSTOWER_SYSTEM_HOSTS_FILE="${SYSTOWER_SYSTEM_HOSTS_FILE:-/config/hosts.conf}"
-    export SYSTOWER_SYSTEM_SSH_KEY="${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}"
+    export SYSTOWER_SYSTEM_ENABLED="${SYSTOWER_SYSTEM_ENABLED:-false}"
     export SYSTOWER_SYSTEM_REBOOT="${SYSTOWER_SYSTEM_REBOOT:-false}"
     export SYSTOWER_LOG_LEVEL="${SYSTOWER_LOG_LEVEL:-info}"
     export SYSTOWER_DRY_RUN="${SYSTOWER_DRY_RUN:-false}"
@@ -408,33 +332,6 @@ load_defaults() {
     export SYSTOWER_NOTIFY_TELEGRAM_TOKEN="${SYSTOWER_NOTIFY_TELEGRAM_TOKEN:-}"
     export SYSTOWER_NOTIFY_TELEGRAM_CHAT="${SYSTOWER_NOTIFY_TELEGRAM_CHAT:-}"
     export SYSTOWER_NOTIFY_WEBHOOK="${SYSTOWER_NOTIFY_WEBHOOK:-}"
-    export SYSTOWER_UI_ENABLED="${SYSTOWER_UI_ENABLED:-true}"
-    export SYSTOWER_UI_PORT="${SYSTOWER_UI_PORT:-8080}"
-    export SYSTOWER_AUTH_USERNAME="${SYSTOWER_AUTH_USERNAME:-${USERNAME:-}}"
-    export SYSTOWER_AUTH_PASSWORD="${SYSTOWER_AUTH_PASSWORD:-${PASSWORD:-}}"
-    export SYSTOWER_OIDC_ENABLED="${SYSTOWER_OIDC_ENABLED:-false}"
-    export SYSTOWER_OIDC_ISSUER="${SYSTOWER_OIDC_ISSUER:-}"
-    export SYSTOWER_OIDC_CLIENT_ID="${SYSTOWER_OIDC_CLIENT_ID:-}"
-    export SYSTOWER_OIDC_CLIENT_SECRET="${SYSTOWER_OIDC_CLIENT_SECRET:-}"
-    export SYSTOWER_OIDC_REDIRECT_URI="${SYSTOWER_OIDC_REDIRECT_URI:-}"
-
-    # Override from config file if it exists
-    local cfg="${SYSTOWER_CONFIG_FILE}"
-    if [ -f "$cfg" ]; then
-        local val
-        val=$(read_config '.general.cron'); [ -n "$val" ] && export SYSTOWER_CRON="$val"
-        val=$(read_config '.general.logLevel'); [ -n "$val" ] && export SYSTOWER_LOG_LEVEL="$val"
-        val=$(read_config '.general.dryRun'); [ -n "$val" ] && export SYSTOWER_DRY_RUN="$val"
-        val=$(read_config '.general.runOnStart'); [ -n "$val" ] && export SYSTOWER_RUN_ON_START="$val"
-        val=$(read_config '.docker.enabled'); [ -n "$val" ] && export SYSTOWER_DOCKER_ENABLED="$val"
-        val=$(read_config '.docker.cleanup'); [ -n "$val" ] && export SYSTOWER_DOCKER_CLEANUP="$val"
-        val=$(read_config '.docker.stopTimeout'); [ -n "$val" ] && export SYSTOWER_DOCKER_STOP_TIMEOUT="$val"
-        val=$(read_config '.docker.monitorOnly'); [ -n "$val" ] && export SYSTOWER_DOCKER_MONITOR_ONLY="$val"
-        val=$(read_config '.docker.healthcheckTimeout'); [ -n "$val" ] && export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="$val"
-        val=$(read_config '.system.enabled'); [ -n "$val" ] && export SYSTOWER_SYSTEM_ENABLED="$val"
-        val=$(read_config '.system.reboot'); [ -n "$val" ] && export SYSTOWER_SYSTEM_REBOOT="$val"
-        val=$(read_config '.notifications.enabled'); [ -n "$val" ] && export SYSTOWER_NOTIFY_ENABLED="$val"
-    fi
 }
 
 # Print current configuration
@@ -445,8 +342,6 @@ print_config() {
     log_info "  Docker updates:        ${SYSTOWER_DOCKER_ENABLED}"
     log_info "  System updates:        ${SYSTOWER_SYSTEM_ENABLED}"
     log_info "  Notifications:         ${SYSTOWER_NOTIFY_ENABLED}"
-    log_info "  Web UI:                ${SYSTOWER_UI_ENABLED} (port ${SYSTOWER_UI_PORT})"
-    log_info "  OIDC SSO:              ${SYSTOWER_OIDC_ENABLED}"
     log_info "  Log level:             ${SYSTOWER_LOG_LEVEL}"
     log_info "  Dry run:               ${SYSTOWER_DRY_RUN}"
 
@@ -460,9 +355,7 @@ print_config() {
     fi
 
     if is_true "$SYSTOWER_SYSTEM_ENABLED"; then
-        log_info "  System hosts (env):    ${SYSTOWER_SYSTEM_HOSTS:-<none>}"
-        log_info "  System hosts file:     ${SYSTOWER_SYSTEM_HOSTS_FILE}"
-        log_info "  System SSH key:        ${SYSTOWER_SYSTEM_SSH_KEY}"
+        log_info "  System host:           local host machine"
         log_info "  System reboot:         ${SYSTOWER_SYSTEM_REBOOT}"
     fi
     log_info ""
@@ -497,33 +390,11 @@ validate_config() {
         errors=$((errors + 1))
     fi
 
-    if is_true "$system_enabled"; then
-        if [ -z "${SYSTOWER_SYSTEM_HOSTS:-}" ] && [ ! -f "${SYSTOWER_SYSTEM_HOSTS_FILE:-/config/hosts.conf}" ]; then
-            log_warn "System updates enabled but no hosts configured"
-            log_warn "Set SYSTOWER_SYSTEM_HOSTS or mount a hosts file at ${SYSTOWER_SYSTEM_HOSTS_FILE:-/config/hosts.conf}"
-        fi
-        if [ ! -f "${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}" ]; then
-            log_warn "SSH key not found at ${SYSTOWER_SYSTEM_SSH_KEY:-/config/ssh/id_rsa}"
-            log_warn "Mount your SSH key: -v ~/.ssh/id_rsa:/config/ssh/id_rsa:ro"
-        fi
-    fi
-
-    if is_true "${SYSTOWER_OIDC_ENABLED:-false}"; then
-        if [ -z "${SYSTOWER_OIDC_ISSUER:-}" ]; then
-            log_error "OIDC enabled but SYSTOWER_OIDC_ISSUER is not set"
-            errors=$((errors + 1))
-        fi
-        if [ -z "${SYSTOWER_OIDC_CLIENT_ID:-}" ]; then
-            log_error "OIDC enabled but SYSTOWER_OIDC_CLIENT_ID is not set"
-            errors=$((errors + 1))
-        fi
-    fi
-
     if ! is_true "$docker_enabled" && ! is_true "$system_enabled"; then
         log_warn "Both Docker and System updates are disabled. Systower has nothing to do!"
     fi
 
-    return $errors
+    return "$errors"
 }
 
 # Mark as loaded to prevent double-sourcing

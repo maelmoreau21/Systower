@@ -2,8 +2,8 @@
 # ============================================================================
 # Systower — Container Entrypoint
 # ============================================================================
-# Initializes the environment, validates configuration, sets up the cron
-# schedule, and optionally runs an immediate update cycle on startup.
+# Initializes environment, validates configuration, sets up the cron
+# schedule, and runs update cycles (on-start and scheduled).
 # ============================================================================
 
 set -euo pipefail
@@ -72,19 +72,6 @@ main() {
     # Setup cron schedule
     setup_cron
 
-    # Start Web UI if enabled
-    local web_pid=""
-    if is_true "${SYSTOWER_UI_ENABLED:-true}"; then
-        if [ -d "/app" ] && [ -f "/app/server.js" ]; then
-            log_info "Starting Web UI on port ${SYSTOWER_UI_PORT:-8080}..."
-            node --max-old-space-size=32 --optimize_for_size /app/server.js >> /var/log/systower-ui.log 2>&1 &
-            web_pid=$!
-            log_info "Web UI started (PID: $web_pid, low-memory mode)"
-        else
-            log_warn "Web UI files not found at /app"
-        fi
-    fi
-
     # Run immediately on start if configured
     if is_true "${SYSTOWER_RUN_ON_START}"; then
         log_info "Running initial update cycle..."
@@ -103,14 +90,14 @@ main() {
     crond -f -l 8 &
     local crond_pid=$!
 
-    # Handle graceful shutdown
-    trap 'log_info "Shutting down Systower..."; kill $crond_pid $tail_pid $web_pid 2>/dev/null; exit 0' SIGTERM SIGINT
-
     # Tail log file to stdout so `docker logs` works
     tail -f /var/log/systower.log &
     local tail_pid=$!
 
-    # Wait for crond to exit
+    # Handle graceful shutdown
+    trap 'log_info "Shutting down Systower..."; kill $crond_pid $tail_pid 2>/dev/null; exit 0' SIGTERM SIGINT
+
+    # Wait for background processes
     wait $crond_pid $tail_pid
 }
 
