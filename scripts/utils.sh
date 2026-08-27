@@ -213,10 +213,17 @@ check_docker_socket() {
         log_error "Make sure to mount it: -v /var/run/docker.sock:/var/run/docker.sock"
         return 1
     fi
-    if ! docker info > /dev/null 2>&1; then
-        log_error "Cannot connect to Docker daemon. Is Docker running?"
-        return 1
-    fi
+
+    local attempts=0
+    while ! docker info > /dev/null 2>&1; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 10 ]; then
+            log_error "Cannot connect to Docker daemon. Is Docker running?"
+            return 1
+        fi
+        log_debug "Waiting for Docker daemon to be ready ($attempts/10)..."
+        sleep 1
+    done
     return 0
 }
 
