@@ -77,9 +77,9 @@ main() {
     if is_true "${SYSTOWER_UI_ENABLED:-true}"; then
         if [ -d "/app" ] && [ -f "/app/server.js" ]; then
             log_info "Starting Web UI on port ${SYSTOWER_UI_PORT:-8080}..."
-            node /app/server.js >> /var/log/systower-ui.log 2>&1 &
+            node --max-old-space-size=32 --optimize_for_size /app/server.js >> /var/log/systower-ui.log 2>&1 &
             web_pid=$!
-            log_info "Web UI started (PID: $web_pid)"
+            log_info "Web UI started (PID: $web_pid, low-memory mode)"
         else
             log_warn "Web UI files not found at /app"
         fi

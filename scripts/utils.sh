@@ -15,7 +15,7 @@ fi
 # ----------------------------------------------------------------------------
 # Constants
 # ----------------------------------------------------------------------------
-readonly SYSTOWER_VERSION="2.0.0"
+readonly SYSTOWER_VERSION="1.0.0"
 readonly SYSTOWER_NAME="Systower"
 
 # Colors (disabled if not a terminal)

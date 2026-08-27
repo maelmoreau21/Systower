@@ -52,7 +52,15 @@ router.get('/', async (req, res) => {
             const composeProject = labels['com.docker.compose.project'] || null;
             const composeService = labels['com.docker.compose.service'] || null;
 
-            const health = c.State?.Health?.Status || (c.State?.Running ? 'running' : c.State?.Status || 'stopped');
+            const rawHealth = c.State?.Health?.Status;
+            let health = 'stopped';
+            if (c.State?.Running) {
+                if (rawHealth === 'unhealthy') {
+                    health = 'unhealthy';
+                } else {
+                    health = 'healthy';
+                }
+            }
 
             return {
                 id: c.Id,

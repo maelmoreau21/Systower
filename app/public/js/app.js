@@ -415,8 +415,12 @@ function renderContainers(searchQuery = '') {
     }
 
     listEl.innerHTML = filtered.map(c => {
-        const healthClass = c.health === 'healthy' || c.health === 'running' ? 'healthy' : (c.health === 'unhealthy' ? 'unhealthy' : 'starting');
+        const healthClass = (c.health === 'healthy' || c.health === 'running') ? 'healthy' : (c.health === 'unhealthy' ? 'unhealthy' : 'starting');
         const excludeBtnText = c.isExcluded ? t.includeBtn : t.excludeBtn;
+        let healthLabel = currentLang === 'fr' ? 'En ligne' : 'Healthy';
+        if (c.health === 'unhealthy') healthLabel = currentLang === 'fr' ? 'Erreur' : 'Unhealthy';
+        if (c.health === 'stopped') healthLabel = currentLang === 'fr' ? 'Arrêté' : 'Stopped';
+        if (c.health === 'starting') healthLabel = currentLang === 'fr' ? 'Démarrage' : 'Starting';
 
         return `
             <div class="container-card ${c.isExcluded ? 'excluded' : ''}" id="card-${c.id}">
@@ -425,7 +429,7 @@ function renderContainers(searchQuery = '') {
                         <div class="container-name">${c.name}</div>
                         <div class="container-image" title="${c.image}">${c.image}</div>
                     </div>
-                    <span class="status-badge ${healthClass}">${c.health}</span>
+                    <span class="status-badge ${healthClass}">${healthLabel}</span>
                 </div>
 
                 <div class="tag-list">

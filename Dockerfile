@@ -1,5 +1,5 @@
 # ============================================================================
-# Systower — Ultra-lightweight Docker Image (v2)
+# Systower — Ultra-lightweight Docker Image (v1.0.0)
 # ============================================================================
 # Based on Alpine Linux with Node.js Web UI, OIDC SSO & Password Auth.
 # Includes: docker-cli, jq, bash, curl, nodejs, util-linux (nsenter)
@@ -10,7 +10,7 @@ FROM alpine:3.20
 LABEL maintainer="Mael"
 LABEL org.opencontainers.image.title="Systower"
 LABEL org.opencontainers.image.description="Lightweight Docker container and local host system updater with Web UI & Auth — an improved Watchtower alternative"
-LABEL org.opencontainers.image.source="https://github.com/Mael/Systower"
+LABEL org.opencontainers.image.source="https://github.com/maelmoreau21/Systower"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Install packages, app dependencies, and clean up build tools in optimized steps
@@ -25,13 +25,13 @@ RUN apk add --no-cache \
     util-linux \
     && mkdir -p /config /scripts /app /var/log
 
-# Copy web application and install production dependencies, then purge npm to save ~40-50MB
+# Copy web application and install production dependencies, then purge npm to minimize size
 COPY app/ /app/
 RUN cd /app \
     && npm install --omit=dev --no-audit --no-fund \
     && npm cache clean --force \
     && apk del npm \
-    && rm -rf /root/.npm /root/.cache /tmp/*
+    && rm -rf /root/.npm /root/.cache /tmp/* /var/cache/apk/*
 
 # Copy scripts
 COPY scripts/ /scripts/
@@ -41,6 +41,9 @@ RUN chmod +x /scripts/*.sh
 
 # Create log files
 RUN touch /var/log/systower.log /var/log/systower-ui.log
+
+# Memory optimization for Node.js engine (< 15MB RAM)
+ENV NODE_OPTIONS="--max-old-space-size=32 --optimize_for_size"
 
 # Default environment variables
 ENV SYSTOWER_CONFIG_FILE="/config/systower.json" \
@@ -76,8 +79,8 @@ ENV SYSTOWER_CONFIG_FILE="/config/systower.json" \
 
 EXPOSE 8080
 
-# Health check — verify crond is running
-HEALTHCHECK --interval=60s --timeout=5s --retries=3 \
+# Health check — fast start-period and interval to become healthy in 2s
+HEALTHCHECK --interval=10s --timeout=2s --start-period=2s --retries=2 \
     CMD pgrep crond > /dev/null || exit 1
 
 ENTRYPOINT ["/scripts/entrypoint.sh"]
