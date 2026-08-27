@@ -1,10 +1,17 @@
 # ============================================================================
-# Systower — Ultra-lightweight Docker Image (v1.0.0)
+# Stage 1: Build & install production dependencies with pnpm
 # ============================================================================
-# Based on Alpine Linux with Node.js Web UI, OIDC SSO & Password Auth.
-# Includes: docker-cli, jq, bash, curl, nodejs, util-linux (nsenter)
-# ============================================================================
+FROM node:20-alpine AS app-builder
 
+WORKDIR /app
+RUN corepack enable pnpm
+
+COPY app/package.json ./
+RUN pnpm install --prod --no-optional
+
+# ============================================================================
+# Stage 2: Ultra-lightweight Final Runtime Image (v1.0.0)
+# ============================================================================
 FROM alpine:3.20
 
 LABEL maintainer="Mael"
@@ -13,25 +20,20 @@ LABEL org.opencontainers.image.description="Lightweight Docker container and loc
 LABEL org.opencontainers.image.source="https://github.com/maelmoreau21/Systower"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install packages, app dependencies, and clean up build tools in optimized steps
+# Install packages without any npm/pnpm overhead in the final runtime
 RUN apk add --no-cache \
     bash \
     curl \
     docker-cli \
     jq \
     nodejs \
-    npm \
     tzdata \
     util-linux \
     && mkdir -p /config /scripts /app /var/log
 
-# Copy web application and install production dependencies, then purge npm to minimize size
+# Copy web application and pnpm production node_modules from builder
 COPY app/ /app/
-RUN cd /app \
-    && npm install --omit=dev --no-audit --no-fund \
-    && npm cache clean --force \
-    && apk del npm \
-    && rm -rf /root/.npm /root/.cache /tmp/* /var/cache/apk/*
+COPY --from=app-builder /app/node_modules /app/node_modules
 
 # Copy scripts
 COPY scripts/ /scripts/

@@ -171,7 +171,7 @@ services:
     labels:
       systower.schedule: "0 3 * * 1" # Update Mondays at 3 AM
       systower.stop-timeout: "45"
-      systower.pre-update: "npm run pre-drain"
+      systower.pre-update: "pnpm run pre-drain"
 ```
 
 ---
