@@ -70,8 +70,8 @@ update_local_host() {
     local update_cmd=""
     case "$os_name" in
         "Debian"|"Ubuntu"|"Raspberry Pi OS")
-            # Non-interactive secure upgrade with GPG verification and purge of obsolete packages
-            update_cmd="export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get upgrade -y -qq && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
+            # Auto-repair interrupted dpkg state, fix broken deps, update and purge obsolete packages
+            update_cmd="export DEBIAN_FRONTEND=noninteractive && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get install -f -y -qq && apt-get update -qq && apt-get upgrade -y -qq && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
             ;;
         "Alpine")
             # Cryptographic RSA signature verification on official APK indexes
@@ -90,7 +90,7 @@ update_local_host() {
             update_cmd="zypper --non-interactive update --auto-agree-with-licenses"
             ;;
         *)
-            update_cmd="export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get upgrade -y -qq"
+            update_cmd="export DEBIAN_FRONTEND=noninteractive && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get update -qq && apt-get upgrade -y -qq"
             ;;
     esac
 
