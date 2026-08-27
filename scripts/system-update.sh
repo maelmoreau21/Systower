@@ -69,13 +69,9 @@ update_local_host() {
 
     local update_cmd=""
     case "$os_name" in
-        "Raspberry Pi OS")
-            # Safe non-interactive upgrade for Raspberry Pi OS Lite (Pi 3, 4, 5) with EEPROM/firmware check
+        "Raspberry Pi OS"|"Debian"|"Ubuntu")
+            # Auto-repair, prevent daemon termination with needrestart, upgrade packages safely, check rpi-eeprom, and clean obsolete packages
             update_cmd="export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get install -f -y -qq && apt-get update -qq && apt-get upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' && if command -v rpi-eeprom-update >/dev/null 2>&1; then rpi-eeprom-update -a 2>/dev/null || true; fi && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
-            ;;
-        "Debian"|"Ubuntu")
-            # Auto-repair, prevent daemon termination with needrestart, upgrade packages safely, and clean obsolete packages
-            update_cmd="export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get install -f -y -qq && apt-get update -qq && apt-get upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
             ;;
         "Alpine")
             # Cryptographic RSA signature verification on official APK indexes
