@@ -50,6 +50,11 @@ CRONEOF
 # ----------------------------------------------------------------------------
 
 main() {
+    # If custom command arguments are passed to the container, execute them directly
+    if [ $# -gt 0 ]; then
+        exec "$@"
+    fi
+
     # Load defaults
     load_defaults
 
