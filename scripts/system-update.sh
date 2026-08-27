@@ -112,11 +112,11 @@ update_local_host() {
         needs_reboot=$(host_exec "[ -f /var/run/reboot-required ] && echo 'yes' || echo 'no'" 2>/dev/null || echo "no")
         if [ "$needs_reboot" = "yes" ]; then
             if is_true "${SYSTOWER_SYSTEM_REBOOT:-false}"; then
-                log_warn "  🔄 Reboot required by updated kernel/packages. Rebooting host in 10s..."
+                log_warn "  🚨 REBOOT TRIGGERED: The host machine will reboot in 10 seconds to apply kernel/system updates (SYSTOWER_SYSTEM_REBOOT=true)."
                 notify_system_update "localhost (${os_name})" "reboot"
                 host_exec "sleep 10 && reboot" 2>/dev/null &
             else
-                log_warn "  ⚠️  Reboot required on host machine (auto-reboot disabled)"
+                log_warn "  ⚠️  Reboot required on host machine to apply updates (auto-reboot disabled, SYSTOWER_SYSTEM_REBOOT=false)."
             fi
         fi
         return 0
