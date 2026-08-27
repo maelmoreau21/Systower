@@ -225,13 +225,21 @@ recreate_container() {
         run_args+=("--shm-size" "$shm_size")
     fi
 
-    # Entrypoint (if custom)
-    local entrypoint
-    entrypoint=$(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint // [] | join(" ")' 2>/dev/null || echo "")
+    # Extract Entrypoint array properly
+    local entrypoint_bin=""
+    local -a entrypoint_args=()
+    entrypoint_bin=$(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint[0] // empty' 2>/dev/null || echo "")
+    if [ -n "$entrypoint_bin" ]; then
+        while IFS= read -r arg; do
+            [ -n "$arg" ] && entrypoint_args+=("$arg")
+        done < <(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint[1:][]?' 2>/dev/null || true)
+    fi
 
-    # Command
-    local cmd
-    cmd=$(echo "$inspect_json" | jq -r '.[0].Config.Cmd // [] | .[]' 2>/dev/null || echo "")
+    # Extract Command array properly
+    local -a cmd_args=()
+    while IFS= read -r arg; do
+        [ -n "$arg" ] && cmd_args+=("$arg")
+    done < <(echo "$inspect_json" | jq -r '.[0].Config.Cmd[]?' 2>/dev/null || true)
 
     # Stop timeout
     local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
@@ -249,22 +257,30 @@ recreate_container() {
     # Rename old container to backup (preserves container in case of failure)
     local backup_name="${container_name}_systower_bak"
     docker rm -f "$backup_name" > /dev/null 2>&1 || true
-    docker rename "$container_id" "$backup_name" > /dev/null 2>&1 || true
+    if ! docker rename "$container_id" "$backup_name" > /dev/null 2>&1; then
+        log_error "Failed to rename container '$container_name' to backup"
+        docker start "$container_id" > /dev/null 2>&1 || true
+        return 1
+    fi
 
     # Build the run command
     local -a full_cmd=("docker" "run" "-d")
     full_cmd+=("${run_args[@]}")
 
-    if [ -n "$entrypoint" ]; then
-        full_cmd+=("--entrypoint" "$entrypoint")
+    if [ -n "$entrypoint_bin" ]; then
+        full_cmd+=("--entrypoint" "$entrypoint_bin")
     fi
 
     full_cmd+=("$image_name")
 
-    if [ -n "$cmd" ]; then
-        while IFS= read -r arg; do
-            [ -n "$arg" ] && full_cmd+=("$arg")
-        done <<< "$cmd"
+    # Append additional entrypoint arguments (e.g. "--")
+    if [ "${#entrypoint_args[@]}" -gt 0 ]; then
+        full_cmd+=("${entrypoint_args[@]}")
+    fi
+
+    # Append command arguments
+    if [ "${#cmd_args[@]}" -gt 0 ]; then
+        full_cmd+=("${cmd_args[@]}")
     fi
 
     # Start new container
