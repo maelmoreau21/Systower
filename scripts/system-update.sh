@@ -42,7 +42,7 @@ detect_host_os() {
         os_info=$(host_exec "cat /etc/os-release 2>/dev/null" 2>/dev/null || cat /etc/os-release 2>/dev/null || echo "")
     fi
 
-    if echo "$os_info" | grep -qi "raspbian\|raspberry"; then
+    if echo "$os_info" | grep -qi "raspbian\|raspberry\|rpi"; then
         echo "Raspberry Pi OS"
     elif echo "$os_info" | grep -qi "ubuntu"; then
         echo "Ubuntu"
@@ -69,7 +69,11 @@ update_local_host() {
 
     local update_cmd=""
     case "$os_name" in
-        "Debian"|"Ubuntu"|"Raspberry Pi OS")
+        "Raspberry Pi OS")
+            # Safe non-interactive upgrade for Raspberry Pi OS Lite (Pi 3, 4, 5) with EEPROM/firmware check
+            update_cmd="export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get install -f -y -qq && apt-get update -qq && apt-get upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' && if command -v rpi-eeprom-update >/dev/null 2>&1; then rpi-eeprom-update -a 2>/dev/null || true; fi && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
+            ;;
+        "Debian"|"Ubuntu")
             # Auto-repair, prevent daemon termination with needrestart, upgrade packages safely, and clean obsolete packages
             update_cmd="export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get install -f -y -qq && apt-get update -qq && apt-get upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
             ;;
