@@ -46,7 +46,7 @@ services:
     # privileged: true
     volumes:
       # Requis : socket Docker
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       # Planification (Tous les jours à 4h00 du matin)
       SYSTOWER_CRON: "0 4 * * *"

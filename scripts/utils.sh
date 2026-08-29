@@ -375,7 +375,15 @@ validate_config() {
     local cron="${SYSTOWER_CRON:-0 4 * * *}"
     local docker_enabled="${SYSTOWER_DOCKER_ENABLED:-true}"
     local system_enabled="${SYSTOWER_SYSTEM_ENABLED:-false}"
+    local run_on_start="${SYSTOWER_RUN_ON_START:-true}"
+    local cleanup="${SYSTOWER_DOCKER_CLEANUP:-true}"
+    local monitor_only="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
+    local system_reboot="${SYSTOWER_SYSTEM_REBOOT:-false}"
+    local notify_enabled="${SYSTOWER_NOTIFY_ENABLED:-false}"
+    local dry_run="${SYSTOWER_DRY_RUN:-false}"
     local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
+    local hc_timeout="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
+    local log_level="${SYSTOWER_LOG_LEVEL:-info}"
 
     if ! validate_cron "$cron"; then
         log_error "Invalid cron expression: $cron"
@@ -392,8 +400,49 @@ validate_config() {
         errors=$((errors + 1))
     fi
 
+    if ! is_boolean "$run_on_start"; then
+        log_error "SYSTOWER_RUN_ON_START must be true or false (got: $run_on_start)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$cleanup"; then
+        log_error "SYSTOWER_DOCKER_CLEANUP must be true or false (got: $cleanup)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$monitor_only"; then
+        log_error "SYSTOWER_DOCKER_MONITOR_ONLY must be true or false (got: $monitor_only)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$system_reboot"; then
+        log_error "SYSTOWER_SYSTEM_REBOOT must be true or false (got: $system_reboot)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$notify_enabled"; then
+        log_error "SYSTOWER_NOTIFY_ENABLED must be true or false (got: $notify_enabled)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$dry_run"; then
+        log_error "SYSTOWER_DRY_RUN must be true or false (got: $dry_run)"
+        errors=$((errors + 1))
+    fi
+
     if ! is_positive_integer "$stop_timeout"; then
         log_error "SYSTOWER_DOCKER_STOP_TIMEOUT must be a positive integer (got: $stop_timeout)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_positive_integer "$hc_timeout"; then
+        log_error "SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT must be a positive integer (got: $hc_timeout)"
+        errors=$((errors + 1))
+    fi
+
+    local level_lower="${log_level,,}"
+    if [[ "$level_lower" != "debug" && "$level_lower" != "info" && "$level_lower" != "warn" && "$level_lower" != "error" ]]; then
+        log_error "SYSTOWER_LOG_LEVEL must be debug, info, warn, or error (got: $log_level)"
         errors=$((errors + 1))
     fi
 

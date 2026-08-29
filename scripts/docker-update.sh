@@ -15,6 +15,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/utils.sh"
 # shellcheck source=notifications.sh
 source "${SCRIPT_DIR}/notifications.sh"
+# shellcheck source=health-check.sh
+source "${SCRIPT_DIR}/health-check.sh"
 
 # ----------------------------------------------------------------------------
 # Container filtering
@@ -27,12 +29,35 @@ should_update_container() {
     local container_id="$1"
     local container_name
     container_name=$(get_container_name "$container_id")
+    local image_name
+    image_name=$(get_container_image "$container_id")
 
     # Never update Systower itself
-    local self_id
-    self_id=$(cat /proc/self/cgroup 2>/dev/null | grep -o '[0-9a-f]\{64\}' | head -n 1 || echo "")
-    if [ -n "$self_id" ] && [ "$container_id" = "$self_id" ]; then
-        log_debug "Skipping self (Systower container)"
+    # 1. Match by container name
+    if [ "$container_name" = "systower" ] || [ "$container_name" = "${SYSTOWER_CONTAINER_NAME:-systower}" ]; then
+        log_debug "Skipping self (Systower container name match)"
+        return 1
+    fi
+
+    # 2. Match by cgroups (v1 / v2 / systemd / cgroupfs)
+    local self_cgroup_id
+    self_cgroup_id=$(cat /proc/self/cgroup /proc/1/cpuset 2>/dev/null | grep -o '[0-9a-f]\{64\}' | head -n 1 || echo "")
+    if [ -n "$self_cgroup_id" ] && [ "$container_id" = "$self_cgroup_id" ]; then
+        log_debug "Skipping self (Systower cgroup ID match)"
+        return 1
+    fi
+
+    # 3. Match by container hostname (short ID)
+    local host_name
+    host_name=$(hostname 2>/dev/null || echo "")
+    if [ -n "$host_name" ] && [[ "$container_id" == "$host_name"* ]]; then
+        log_debug "Skipping self (Systower hostname match)"
+        return 1
+    fi
+
+    # 4. Match by image name
+    if [[ "$image_name" == *"systower"* ]] && [ "${SYSTOWER_UPDATE_SELF:-false}" != "true" ]; then
+        log_debug "Skipping self (Systower image match: $image_name)"
         return 1
     fi
 
@@ -114,26 +139,26 @@ recreate_container() {
         fi
     fi
 
-    # Environment variables
-    local envs
-    envs=$(echo "$inspect_json" | jq -r '.[0].Config.Env[]?' 2>/dev/null || echo "")
-    while IFS= read -r env; do
-        [ -n "$env" ] && run_args+=("-e" "$env")
-    done <<< "$envs"
+    # Environment variables (null-delimited for safe multiline values)
+    while IFS= read -r -d '' env_var; do
+        [ -n "$env_var" ] && run_args+=("-e" "$env_var")
+    done < <(echo "$inspect_json" | jq -j '.[0].Config.Env[]? // empty | . + "\u0000"' 2>/dev/null || true)
 
     # Network mode
     if [ "$network_mode" != "default" ] && [ "$network_mode" != "bridge" ]; then
         run_args+=("--network" "$network_mode")
     fi
 
-    # Port bindings (only if not in host or container network mode)
+    # Port bindings (with IPv6 bracket support)
     if [ "$network_mode" != "host" ] && [[ "$network_mode" != container:* ]]; then
         local port_bindings
         port_bindings=$(echo "$inspect_json" | jq -r '
             .[0].HostConfig.PortBindings // {} | to_entries[] |
             .key as $container_port |
             .value[]? |
-            (if .HostIp != "" and .HostIp != "0.0.0.0" then .HostIp + ":" else "" end) +
+            (if .HostIp != "" and .HostIp != "0.0.0.0" then
+                (if (.HostIp | contains(":")) then "[" + .HostIp + "]:" else .HostIp + ":" end)
+             else "" end) +
             (if .HostPort != "" then .HostPort + ":" else "" end) +
             $container_port
         ' 2>/dev/null || echo "")
@@ -149,26 +174,24 @@ recreate_container() {
         [ -n "$bind" ] && run_args+=("-v" "$bind")
     done <<< "$binds"
 
-    # Named volume mounts
+    # Named volume mounts not already present in binds
     local volume_mounts
     volume_mounts=$(echo "$inspect_json" | jq -r '
-        .[0].Mounts[]? | select(.Type == "volume") |
+        .[0].Mounts[]? | select(.Type == "volume" and .Name != null and .Name != "") |
         .Name + ":" + .Destination + (if .RW == false then ":ro" else "" end)
     ' 2>/dev/null || echo "")
     while IFS= read -r mount; do
         if [ -n "$mount" ]; then
-            if ! echo "$binds" | grep -q "$mount"; then
+            if ! printf '%s\n' "$binds" | grep -Fxq "$mount"; then
                 run_args+=("-v" "$mount")
             fi
         fi
     done <<< "$volume_mounts"
 
-    # Labels (preserves compose and portainer labels)
-    local labels
-    labels=$(echo "$inspect_json" | jq -r '.[0].Config.Labels // {} | to_entries[] | .key + "=" + .value' 2>/dev/null || echo "")
-    while IFS= read -r label; do
+    # Labels (null-delimited for safe multiline strings)
+    while IFS= read -r -d '' label; do
         [ -n "$label" ] && run_args+=("--label" "$label")
-    done <<< "$labels"
+    done < <(echo "$inspect_json" | jq -j '.[0].Config.Labels // {} | to_entries[] | (.key + "=" + .value) + "\u0000"' 2>/dev/null || true)
 
     # Hostname & Domainname
     local hostname_val
@@ -224,6 +247,42 @@ recreate_container() {
     if [ "$shm_size" -gt 67108864 ]; then # Larger than default 64MB
         run_args+=("--shm-size" "$shm_size")
     fi
+
+    # Resource Limits (Memory & CPU)
+    local memory_limit
+    memory_limit=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Memory // 0' 2>/dev/null || echo "0")
+    if [ "$memory_limit" -gt 0 ]; then
+        run_args+=("--memory" "${memory_limit}b")
+    fi
+
+    local nano_cpus
+    nano_cpus=$(echo "$inspect_json" | jq -r '.[0].HostConfig.NanoCpus // 0' 2>/dev/null || echo "0")
+    if [ "$nano_cpus" -gt 0 ]; then
+        local cpus_val
+        cpus_val=$(awk -v n="$nano_cpus" 'BEGIN { printf "%.2f", n / 1000000000 }' 2>/dev/null | sed 's/\.00$//' || echo "")
+        [ -n "$cpus_val" ] && run_args+=("--cpus" "$cpus_val")
+    fi
+
+    # Extra Hosts (--add-host)
+    local extra_hosts
+    extra_hosts=$(echo "$inspect_json" | jq -r '.[0].HostConfig.ExtraHosts[]?' 2>/dev/null || echo "")
+    while IFS= read -r extra_host; do
+        [ -n "$extra_host" ] && run_args+=("--add-host" "$extra_host")
+    done <<< "$extra_hosts"
+
+    # Custom DNS
+    local dns_servers
+    dns_servers=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Dns[]?' 2>/dev/null || echo "")
+    while IFS= read -r dns; do
+        [ -n "$dns" ] && run_args+=("--dns" "$dns")
+    done <<< "$dns_servers"
+
+    # Sysctls
+    local sysctls
+    sysctls=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Sysctls // {} | to_entries[] | .key + "=" + .value' 2>/dev/null || echo "")
+    while IFS= read -r sysctl; do
+        [ -n "$sysctl" ] && run_args+=("--sysctl" "$sysctl")
+    done <<< "$sysctls"
 
     # Extract Entrypoint array properly
     local entrypoint_bin=""
@@ -295,6 +354,20 @@ recreate_container() {
                     docker network connect "$net" "$container_name" 2>/dev/null || true
                 fi
             done <<< "$extra_networks"
+        fi
+
+        # Verify container health / running status post-update
+        if ! check_container_health "$container_name"; then
+            log_error "❌ Container '$container_name' failed health check after update!"
+            notify_update_failed "$container_name" "Health check failed after restart"
+
+            # Instant Rollback: restore backup container
+            log_warn "🔄 Rolling back '$container_name' to previous container state..."
+            docker rm -f "$container_name" > /dev/null 2>&1 || true
+            docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+            docker start "$container_name" > /dev/null 2>&1 || true
+            notify_rollback "$container_name" "Health check failed (reverted to previous image)"
+            return 1
         fi
 
         # Remove backup container on success

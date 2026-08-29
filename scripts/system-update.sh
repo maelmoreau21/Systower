@@ -128,6 +128,23 @@ update_local_host() {
     fi
 }
 
+# Verify if host namespace is accessible
+check_host_access() {
+    if ! command -v nsenter >/dev/null 2>&1 && [ ! -d /host/etc ]; then
+        log_error "nsenter utility not found and /host not mounted."
+        return 1
+    fi
+
+    local test_out=""
+    if ! test_out=$(host_exec "true" 2>&1); then
+        log_error "Cannot execute commands in host namespace."
+        log_error "To enable host updates, please ensure 'pid: \"host\"' and 'privileged: true' are enabled in your docker-compose.yml"
+        log_debug "Host exec error: $test_out"
+        return 1
+    fi
+    return 0
+}
+
 # Run the system update process
 run_system_updates() {
     log_section "🖥️  Host System Update"
@@ -135,6 +152,13 @@ run_system_updates() {
     if ! is_true "${SYSTOWER_SYSTEM_ENABLED:-false}"; then
         log_info "System updates disabled (set SYSTOWER_SYSTEM_ENABLED=true to enable)."
         return 0
+    fi
+
+    if ! check_host_access; then
+        export _SYSTEM_UPDATED=0
+        export _SYSTEM_FAILED=1
+        notify_system_update "localhost" "error"
+        return 1
     fi
 
     local updated=0

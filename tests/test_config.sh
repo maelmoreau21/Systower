@@ -49,3 +49,21 @@ test_validate_config_invalid_stop_timeout() {
     export SYSTOWER_DOCKER_STOP_TIMEOUT="-5"
     ! validate_config
 }
+
+test_validate_config_invalid_healthcheck_timeout() {
+    load_defaults
+    export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="abc"
+    ! validate_config
+}
+
+test_validate_config_invalid_log_level() {
+    load_defaults
+    export SYSTOWER_LOG_LEVEL="verbose_unknown"
+    ! validate_config
+}
+
+test_validate_config_invalid_boolean() {
+    load_defaults
+    export SYSTOWER_DOCKER_CLEANUP="maybe"
+    ! validate_config
+}

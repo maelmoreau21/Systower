@@ -13,8 +13,8 @@ services:
     # pid: "host"
     # privileged: true
     volumes:
-      # Required: Docker socket for container management
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Required: Docker socket for container management (read-write required to stop/recreate containers)
+      - /var/run/docker.sock:/var/run/docker.sock
 
     environment:
       # Schedule (cron syntax: every day at 4:00 AM)

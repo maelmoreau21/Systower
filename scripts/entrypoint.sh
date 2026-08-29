@@ -20,19 +20,25 @@ source "${SCRIPT_DIR}/utils.sh"
 setup_cron() {
     local cron_expr="${SYSTOWER_CRON}"
     local log_file="/var/log/systower.log"
+    local env_file="/tmp/systower.env"
 
-    # Export all SYSTOWER_ environment variables for the cron context
-    local env_exports=""
+    # Export environment safely to an env file with secure permissions
+    : > "$env_file"
+    chmod 600 "$env_file" 2>/dev/null || true
+
     while IFS='=' read -r name value; do
-        if [[ "$name" == SYSTOWER_* ]] || [[ "$name" == "TZ" ]] || [[ "$name" == "PATH" ]]; then
-            env_exports+="export ${name}=\"${value}\"\n"
+        if [[ "$name" =~ ^SYSTOWER_ ]] || [ "$name" = "TZ" ] || [ "$name" = "PATH" ]; then
+            printf 'export %s=%q\n' "$name" "$value" >> "$env_file"
         fi
     done < <(env)
 
     # Create the cron wrapper script
     cat > /tmp/systower-cron.sh << CRONEOF
 #!/usr/bin/env bash
-$(echo -e "$env_exports")
+if [ -f /tmp/systower.env ]; then
+    # shellcheck disable=SC1091
+    source /tmp/systower.env
+fi
 exec ${SCRIPT_DIR}/systower.sh >> ${log_file} 2>&1
 CRONEOF
     chmod +x /tmp/systower-cron.sh
