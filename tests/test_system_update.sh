@@ -37,3 +37,19 @@ test_system_reboot_default_false() {
     load_defaults
     [ "$SYSTOWER_SYSTEM_REBOOT" = "false" ]
 }
+
+test_update_local_host_skips_docker_desktop() {
+    detect_host_os() {
+        echo "Docker Desktop / WSL"
+    }
+    # Should safely return 0 without executing host commands
+    update_local_host
+}
+
+test_update_local_host_skips_unknown_os() {
+    detect_host_os() {
+        echo "Unknown"
+    }
+    # Should safely return 0 without executing host commands
+    update_local_host
+}

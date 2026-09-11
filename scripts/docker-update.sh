@@ -33,13 +33,22 @@ should_update_container() {
     image_name=$(get_container_image "$container_id")
 
     # Never update Systower itself
-    # 1. Match by container name
-    if [ "$container_name" = "systower" ] || [ "$container_name" = "${SYSTOWER_CONTAINER_NAME:-systower}" ]; then
-        log_debug "Skipping self (Systower container name match)"
+    # 1. Match by container name (exact, substring or env)
+    local cname_lower="${container_name,,}"
+    if [ "$container_name" = "systower" ] || [ "$container_name" = "${SYSTOWER_CONTAINER_NAME:-systower}" ] || [[ "$cname_lower" == *"systower"* ]]; then
+        log_debug "Skipping self (Systower container name match: $container_name)"
         return 1
     fi
 
-    # 2. Match by cgroups (v1 / v2 / systemd / cgroupfs)
+    # 2. Match by compose service name label
+    local compose_service
+    compose_service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container_id" 2>/dev/null || echo "")
+    if [ -n "$compose_service" ] && [[ "${compose_service,,}" == *"systower"* ]]; then
+        log_debug "Skipping self (Systower compose service label match: $compose_service)"
+        return 1
+    fi
+
+    # 3. Match by cgroups (v1 / v2 / systemd / cgroupfs)
     local self_cgroup_id
     self_cgroup_id=$(cat /proc/self/cgroup /proc/1/cpuset 2>/dev/null | grep -o '[0-9a-f]\{64\}' | head -n 1 || echo "")
     if [ -n "$self_cgroup_id" ] && [ "$container_id" = "$self_cgroup_id" ]; then
@@ -47,16 +56,16 @@ should_update_container() {
         return 1
     fi
 
-    # 3. Match by container hostname (short ID)
+    # 4. Match by container hostname (short ID)
     local host_name
     host_name=$(hostname 2>/dev/null || echo "")
-    if [ -n "$host_name" ] && [[ "$container_id" == "$host_name"* ]]; then
+    if [ -n "$host_name" ] && [ ${#host_name} -ge 12 ] && [[ "$container_id" == "$host_name"* ]]; then
         log_debug "Skipping self (Systower hostname match)"
         return 1
     fi
 
-    # 4. Match by image name
-    if [[ "$image_name" == *"systower"* ]] && [ "${SYSTOWER_UPDATE_SELF:-false}" != "true" ]; then
+    # 5. Match by image name
+    if [[ "${image_name,,}" == *"systower"* ]] && [ "${SYSTOWER_UPDATE_SELF:-false}" != "true" ]; then
         log_debug "Skipping self (Systower image match: $image_name)"
         return 1
     fi
@@ -69,6 +78,14 @@ should_update_container() {
     # Check label exclusion: systower.exclude=true
     if is_container_excluded_by_label "$container_id"; then
         log_debug "Skipping '$container_name' (excluded by label)"
+        return 1
+    fi
+
+    # Skip containers mounting docker.sock (socket proxies, portainer, other updaters) unless explicitly included
+    local mounts_docker_sock
+    mounts_docker_sock=$(docker inspect --format '{{ range .Mounts }}{{ if eq .Source "/var/run/docker.sock" }}true{{ end }}{{ end }}' "$container_id" 2>/dev/null || echo "")
+    if [ "$mounts_docker_sock" = "true" ] && [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ]; then
+        log_debug "Skipping '$container_name' (mounts docker.sock - protected daemon component)"
         return 1
     fi
 
@@ -322,6 +339,13 @@ recreate_container() {
         return 1
     fi
 
+    # Disconnect backup container from custom networks to prevent IPAM address/port collisions
+    if [ -n "$extra_networks" ]; then
+        while IFS= read -r net; do
+            [ -n "$net" ] && docker network disconnect -f "$net" "$backup_name" > /dev/null 2>&1 || true
+        done <<< "$extra_networks"
+    fi
+
     # Build the run command
     local -a full_cmd=("docker" "run" "-d")
     full_cmd+=("${run_args[@]}")
@@ -365,6 +389,11 @@ recreate_container() {
             log_warn "🔄 Rolling back '$container_name' to previous container state..."
             docker rm -f "$container_name" > /dev/null 2>&1 || true
             docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+            if [ -n "$extra_networks" ]; then
+                while IFS= read -r net; do
+                    [ -n "$net" ] && docker network connect "$net" "$container_name" > /dev/null 2>&1 || true
+                done <<< "$extra_networks"
+            fi
             docker start "$container_name" > /dev/null 2>&1 || true
             notify_rollback "$container_name" "Health check failed (reverted to previous image)"
             return 1
@@ -385,6 +414,11 @@ recreate_container() {
         log_warn "🔄 Rolling back '$container_name' to previous container state..."
         docker rm -f "$container_name" > /dev/null 2>&1 || true
         docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+        if [ -n "$extra_networks" ]; then
+            while IFS= read -r net; do
+                [ -n "$net" ] && docker network connect "$net" "$container_name" > /dev/null 2>&1 || true
+            done <<< "$extra_networks"
+        fi
         docker start "$container_name" > /dev/null 2>&1 || true
         notify_rollback "$container_name" "New image failed to start"
         return 1

@@ -36,10 +36,18 @@ host_exec() {
 # Detect OS of the host machine
 detect_host_os() {
     local os_info=""
+    local kernel_info=""
     if [ -f /host/etc/os-release ]; then
         os_info=$(cat /host/etc/os-release 2>/dev/null || echo "")
     else
         os_info=$(host_exec "cat /etc/os-release 2>/dev/null" 2>/dev/null || cat /etc/os-release 2>/dev/null || echo "")
+    fi
+    kernel_info=$(host_exec "uname -r 2>/dev/null; cat /proc/version 2>/dev/null" 2>/dev/null || cat /proc/version 2>/dev/null || echo "")
+
+    # Check for Docker Desktop or WSL environments
+    if echo "$os_info" | grep -qi "docker desktop" || echo "$kernel_info" | grep -qi "microsoft\|wsl"; then
+        echo "Docker Desktop / WSL"
+        return 0
     fi
 
     if echo "$os_info" | grep -qi "raspbian\|raspberry\|rpi"; then
@@ -57,7 +65,7 @@ detect_host_os() {
     elif echo "$os_info" | grep -qi "suse\|opensuse"; then
         echo "openSUSE"
     else
-        echo "Debian"
+        echo "Unknown"
     fi
 }
 
@@ -67,30 +75,57 @@ update_local_host() {
     os_name=$(detect_host_os)
     log_info "Detected Host OS: $os_name"
 
+    # Refuse host OS updates in virtualized/containerized desktop environments
+    if [ "$os_name" = "Docker Desktop / WSL" ]; then
+        log_warn "  ⚠️ Host OS package updates are not supported on Docker Desktop / WSL environments."
+        log_warn "  Docker Desktop manages its own engine updates via the host application."
+        return 0
+    fi
+
+    if [ "$os_name" = "Unknown" ]; then
+        log_warn "  ⚠️ Unrecognized host OS. Skipping system updates to prevent package manager conflicts."
+        return 0
+    fi
+
     local update_cmd=""
     case "$os_name" in
         "Raspberry Pi OS"|"Debian"|"Ubuntu")
-            # Auto-repair, prevent daemon termination with needrestart, dist-upgrade for new kernels/firmware, check rpi-eeprom, and clean obsolete packages
-            update_cmd="export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get install -f -y -qq && apt-get update -qq && apt-get dist-upgrade -y -qq -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' && if command -v rpi-eeprom-update >/dev/null 2>&1; then rpi-eeprom-update -a 2>/dev/null || true; fi && apt-get autoremove -y -qq --purge && apt-get autoclean -qq"
+            # 1. Temporarily hold Docker & Containerd packages to NEVER let dist-upgrade terminate or restart docker daemon mid-run
+            # 2. Place policy-rc.d returning 101 so invoke-rc.d will not start/restart daemons during apt upgrade
+            # 3. Use NEEDRESTART_MODE=l and NEEDRESTART_SUSPEND=1
+            # 4. Remove policy-rc.d on exit/trap
+            update_cmd='export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && \
+apt-mark hold docker-ce docker-ce-cli containerd.io docker.io containerd runc docker-buildx-plugin docker-compose-plugin 2>/dev/null || true && \
+printf "#!/bin/sh\nexit 101\n" > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d && \
+trap "rm -f /usr/sbin/policy-rc.d" EXIT INT TERM && \
+dpkg --configure -a --force-confold 2>/dev/null || true && \
+apt-get install -f -y -qq && \
+apt-get update -qq && \
+apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && \
+if command -v rpi-eeprom-update >/dev/null 2>&1; then rpi-eeprom-update -a 2>/dev/null || true; fi && \
+apt-get autoremove -y -qq --purge && \
+apt-get autoclean -qq && \
+rm -f /usr/sbin/policy-rc.d'
             ;;
         "Alpine")
             # Cryptographic RSA signature verification on official APK indexes
             update_cmd="apk update && apk upgrade --no-cache"
             ;;
         "Arch Linux")
-            # GPG keyring verification on Arch repositories
-            update_cmd="pacman -Syu --noconfirm"
+            # GPG keyring verification on Arch repositories, safely excluding Docker daemon packages
+            update_cmd="pacman -Syu --noconfirm --ignore docker,containerd,runc"
             ;;
         "Fedora/RHEL")
-            # RPM-GPG signature verification on DNF/RPM packages
-            update_cmd="dnf upgrade -y -q --refresh"
+            # RPM-GPG signature verification on DNF/RPM packages, safely excluding Docker daemon packages
+            update_cmd="dnf upgrade -y -q --refresh --exclude='docker*,containerd*,runc*'"
             ;;
         "openSUSE")
-            # RPM-GPG signature verification on Zypper repositories
-            update_cmd="zypper --non-interactive update --auto-agree-with-licenses"
+            # RPM-GPG signature verification on Zypper repositories, safely excluding Docker daemon packages
+            update_cmd="zypper --non-interactive update --auto-agree-with-licenses --exclude='docker,containerd,runc'"
             ;;
         *)
-            update_cmd="export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 && dpkg --configure -a --force-confold 2>/dev/null || true && apt-get update -qq && apt-get upgrade -y -qq"
+            log_warn "Unsupported distribution '$os_name'. Skipping host updates."
+            return 0
             ;;
     esac
 

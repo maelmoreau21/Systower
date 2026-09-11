@@ -16,6 +16,9 @@ services:
       # Required: Docker socket for container management (read-write required to stop/recreate containers)
       - /var/run/docker.sock:/var/run/docker.sock
 
+    labels:
+      systower.exclude: "true"
+
     environment:
       # Schedule (cron syntax: every day at 4:00 AM)
       SYSTOWER_CRON: "0 4 * * *"
