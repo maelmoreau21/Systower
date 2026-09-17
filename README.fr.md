@@ -114,6 +114,21 @@ Activez les alertes en définissant les variables correspondantes :
 
 ---
 
+## 🍓 Spécificités Raspberry Pi & Protection Réseau
+
+Sur Raspberry Pi OS (surtout Bullseye/Buster avec `dhcpcd`, ou Bookworm avec `NetworkManager`), la création d'interfaces virtuelles Docker (`veth*`) amène couramment le démon réseau hôte à supprimer la route par défaut (passerelle Internet).
+
+Systower intègre des protections natives pour éliminer ce problème :
+- **Auto-immunisation hôte (`SYSTOWER_RPI_NETWORK_IMMUNITY=true`)** : Si Systower dispose des droits hôte (`pid: "host"` et `privileged: true`), il injecte automatiquement la règle `denyinterfaces veth* docker* br-*` dans `/etc/dhcpcd.conf` ou configure NetworkManager pour ignorer ces interfaces.
+- **Protection des conteneurs réseau (`SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS=true`)** : Évite les coupures intempestives en protégeant les conteneurs avec `network_mode: host`, `NET_ADMIN`, ou les images VPN/passerelles (Tailscale, WireGuard, Gluetun, Pi-hole).
+- **Temporisation anti-OOM (`SYSTOWER_DOCKER_UPDATE_DELAY=2`)** : Pause de 2 secondes entre les mises à jour pour éviter la saturation de la RAM et les crashs de `dockerd` sur les cartes à ressources limitées.
+
+> [!TIP]
+> **Immunisation manuelle rapide sur Raspberry Pi (sans `pid: host`) :**
+> Ajoutez la ligne `denyinterfaces veth* docker* br-*` à la fin de `/etc/dhcpcd.conf` puis lancez `sudo systemctl restart dhcpcd`.
+
+---
+
 ## ⚙️ Référence des Variables d'Environnement
 
 | Variable | Défaut | Description |
@@ -128,6 +143,9 @@ Activez les alertes en définissant les variables correspondantes :
 | `SYSTOWER_DOCKER_EXCLUDE` | `""` | Liste des conteneurs à exclure séparés par des virgules |
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | Si défini, seuls ces conteneurs seront mis à jour |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Délai d'arrêt avant forçage (secondes) |
+| `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `true` | Protéger les conteneurs VPN, DNS et host mode |
+| `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Délai de pause (secondes) entre chaque mise à jour |
+| `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Immuniser automatiquement le réseau hôte Raspberry Pi |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Activer la mise à jour des paquets de la machine hôte |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Redémarrage automatique si requis par les paquets |
 | `SYSTOWER_NOTIFY_ENABLED` | `false` | Activer le système de notifications |

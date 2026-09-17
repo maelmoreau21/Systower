@@ -53,3 +53,8 @@ test_update_local_host_skips_unknown_os() {
     # Should safely return 0 without executing host commands
     update_local_host
 }
+
+test_immunize_host_network_noop_when_disabled() {
+    export SYSTOWER_RPI_NETWORK_IMMUNITY="false"
+    immunize_host_network
+}

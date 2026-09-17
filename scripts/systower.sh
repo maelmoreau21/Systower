@@ -44,6 +44,13 @@ main() {
     export _SYSTEM_UPDATED=0
     export _SYSTEM_FAILED=0
 
+    # Immunize host network managers (dhcpcd/NetworkManager) if host access is available
+    if is_true "${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"; then
+        if check_host_access >/dev/null 2>&1; then
+            immunize_host_network
+        fi
+    fi
+
     # Run Docker updates
     if is_true "${SYSTOWER_DOCKER_ENABLED:-true}"; then
         if ! run_docker_updates; then

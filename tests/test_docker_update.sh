@@ -102,3 +102,21 @@ test_cleanup_boolean() {
     export SYSTOWER_DOCKER_CLEANUP="false"
     is_boolean "$SYSTOWER_DOCKER_CLEANUP"
 }
+
+test_protect_network_containers_default_true() {
+    unset SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS" = "true" ]
+}
+
+test_update_delay_default() {
+    unset SYSTOWER_DOCKER_UPDATE_DELAY 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_DOCKER_UPDATE_DELAY" = "2" ]
+}
+
+test_rpi_immunity_default_true() {
+    unset SYSTOWER_RPI_NETWORK_IMMUNITY 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_RPI_NETWORK_IMMUNITY" = "true" ]
+}

@@ -114,6 +114,21 @@ Enable notifications by setting the corresponding environment variables:
 
 ---
 
+## 🍓 Raspberry Pi Specifics & Network Protection
+
+On Raspberry Pi OS (notably Bullseye/Buster using `dhcpcd`, and Bookworm using `NetworkManager`), Docker's virtual Ethernet interfaces (`veth*`) can cause the host network manager to accidentally delete the host's default gateway route, dropping Internet and SSH connectivity.
+
+Systower includes built-in safeguards:
+- **Host Network Auto-Immunity (`SYSTOWER_RPI_NETWORK_IMMUNITY=true`)**: When running with host privileges (`pid: "host"` and `privileged: true`), Systower automatically adds `denyinterfaces veth* docker* br-*` to `/etc/dhcpcd.conf` or configures NetworkManager to ignore virtual Docker interfaces.
+- **Network-Sensitive Container Protection (`SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS=true`)**: Safely skips hot updates on containers using `network_mode: host`, `NET_ADMIN`, or running VPN/gateway tools (Tailscale, WireGuard, Gluetun, Pi-hole).
+- **Anti-OOM Cooldown Throttle (`SYSTOWER_DOCKER_UPDATE_DELAY=2`)**: Adds a 2-second cooldown between container updates to reduce memory and MicroSD card I/O pressure on resource-constrained boards.
+
+> [!TIP]
+> **Manual 1-Step Fix for Raspberry Pi (if not using `pid: host`):**
+> Append `denyinterfaces veth* docker* br-*` to `/etc/dhcpcd.conf` and restart with `sudo systemctl restart dhcpcd`.
+
+---
+
 ## ⚙️ Configuration Reference
 
 | Environment Variable | Default | Description |
@@ -128,6 +143,9 @@ Enable notifications by setting the corresponding environment variables:
 | `SYSTOWER_DOCKER_EXCLUDE` | `""` | Comma-separated container names to exclude |
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | If set, only these containers will be updated |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
+| `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `true` | Protect VPN, DNS, and host-mode network containers |
+| `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Cooldown pause (seconds) between container updates |
+| `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Automatically immunize Raspberry Pi host networking |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot host system if kernel/packages require it |
 | `SYSTOWER_NOTIFY_ENABLED` | `false` | Enable notifications dispatcher |

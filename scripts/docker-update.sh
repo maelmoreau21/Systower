@@ -22,6 +22,39 @@ source "${SCRIPT_DIR}/health-check.sh"
 # Container filtering
 # ----------------------------------------------------------------------------
 
+# Check if a container is network-sensitive (VPN, host network mode, DNS gateway)
+# Arguments: $1 - container ID
+# Returns: 0 if sensitive, 1 if standard
+is_network_sensitive_container() {
+    local container_id="$1"
+
+    # Check network mode
+    local net_mode
+    net_mode=$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$container_id" 2>/dev/null || echo "")
+    if [ "$net_mode" = "host" ] || [[ "$net_mode" == container:* ]]; then
+        return 0
+    fi
+
+    # Check capabilities for NET_ADMIN or NET_RAW
+    local cap_adds
+    cap_adds=$(docker inspect --format '{{range .HostConfig.CapAdd}}{{.}} {{end}}' "$container_id" 2>/dev/null || echo "")
+    if echo "$cap_adds" | grep -Eq '\b(NET_ADMIN|NET_RAW)\b'; then
+        return 0
+    fi
+
+    # Check container name and image name for known networking / VPN / DNS daemons
+    local container_name image_name
+    container_name=$(get_container_name "$container_id")
+    image_name=$(get_container_image "$container_id")
+    local combined="${container_name,,} ${image_name,,}"
+
+    if echo "$combined" | grep -Eq 'wireguard|tailscale|gluetun|openvpn|pihole|pi-hole|adguard|cloudflared|zerotier|netmaker|nebula|tinc'; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Determine if a container should be updated
 # Arguments: $1 - container ID
 # Returns: 0 if should update, 1 if should skip
@@ -87,6 +120,18 @@ should_update_container() {
     if [ "$mounts_docker_sock" = "true" ] && [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ]; then
         log_debug "Skipping '$container_name' (mounts docker.sock - protected daemon component)"
         return 1
+    fi
+
+    # Protect network-sensitive / VPN containers if enabled
+    if is_true "${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-true}"; then
+        if is_network_sensitive_container "$container_id"; then
+            # If explicitly in include-only, allow it; otherwise protect host networking by skipping
+            if [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ] || ! in_csv_list "$container_name" "$SYSTOWER_DOCKER_INCLUDE_ONLY"; then
+                log_warn "Skipping '$container_name' (protected network/VPN container — prevents host route/DNS drops)"
+                log_debug "To update anyway, add '$container_name' to SYSTOWER_DOCKER_INCLUDE_ONLY or set SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS=false"
+                return 1
+            fi
+        fi
     fi
 
     # Check include-only list (takes priority over exclude list)
@@ -164,6 +209,13 @@ recreate_container() {
     # Network mode
     if [ "$network_mode" != "default" ] && [ "$network_mode" != "bridge" ]; then
         run_args+=("--network" "$network_mode")
+        local primary_ip4 primary_ip6 primary_mac
+        primary_ip4=$(echo "$inspect_json" | jq -r ".[0].NetworkSettings.Networks[\"$network_mode\"].IPAMConfig.IPv4Address // empty" 2>/dev/null || echo "")
+        primary_ip6=$(echo "$inspect_json" | jq -r ".[0].NetworkSettings.Networks[\"$network_mode\"].IPAMConfig.IPv6Address // empty" 2>/dev/null || echo "")
+        primary_mac=$(echo "$inspect_json" | jq -r ".[0].NetworkSettings.Networks[\"$network_mode\"].MacAddress // empty" 2>/dev/null || echo "")
+        [ -n "$primary_ip4" ] && run_args+=("--ip" "$primary_ip4")
+        [ -n "$primary_ip6" ] && run_args+=("--ip6" "$primary_ip6")
+        [ -n "$primary_mac" ] && run_args+=("--mac-address" "$primary_mac")
     fi
 
     # Port bindings (with IPv6 bracket support)
@@ -339,10 +391,10 @@ recreate_container() {
         return 1
     fi
 
-    # Disconnect backup container from custom networks to prevent IPAM address/port collisions
+    # Disconnect backup container from custom networks cleanly (WITHOUT -f to prevent Libnetwork panic/crash)
     if [ -n "$extra_networks" ]; then
         while IFS= read -r net; do
-            [ -n "$net" ] && docker network disconnect -f "$net" "$backup_name" > /dev/null 2>&1 || true
+            [ -n "$net" ] && docker network disconnect "$net" "$backup_name" > /dev/null 2>&1 || true
         done <<< "$extra_networks"
     fi
 
@@ -370,12 +422,18 @@ recreate_container() {
     log_info "Starting new container '$container_name'..."
     local run_output=""
     if run_output=$("${full_cmd[@]}" 2>&1); then
-        # Reconnect to extra networks
+        # Reconnect to extra networks (preserving static IPs if defined)
         if [ -n "$extra_networks" ]; then
             while IFS= read -r net; do
                 if [ -n "$net" ] && [ "$net" != "$network_mode" ]; then
                     log_debug "Reconnecting '$container_name' to network '$net'"
-                    docker network connect "$net" "$container_name" 2>/dev/null || true
+                    local extra_ip4 extra_ip6
+                    extra_ip4=$(echo "$inspect_json" | jq -r ".[0].NetworkSettings.Networks[\"$net\"].IPAMConfig.IPv4Address // empty" 2>/dev/null || echo "")
+                    extra_ip6=$(echo "$inspect_json" | jq -r ".[0].NetworkSettings.Networks[\"$net\"].IPAMConfig.IPv6Address // empty" 2>/dev/null || echo "")
+                    local -a net_conn_args=()
+                    [ -n "$extra_ip4" ] && net_conn_args+=("--ip" "$extra_ip4")
+                    [ -n "$extra_ip6" ] && net_conn_args+=("--ip6" "$extra_ip6")
+                    docker network connect "${net_conn_args[@]}" "$net" "$container_name" 2>/dev/null || true
                 fi
             done <<< "$extra_networks"
         fi
@@ -521,6 +579,13 @@ run_docker_updates() {
             fi
         else
             failed=$((failed + 1))
+        fi
+
+        # Cooldown delay between updates (relieves CPU, RAM and MicroSD I/O on Raspberry Pi)
+        local delay="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
+        if [ "$delay" -gt 0 ]; then
+            log_debug "Waiting ${delay}s cooldown before next container..."
+            sleep "$delay"
         fi
 
     done <<< "$container_ids"

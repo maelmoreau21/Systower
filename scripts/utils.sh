@@ -318,7 +318,6 @@ parse_hosts_file() {
 # Environment defaults
 # ----------------------------------------------------------------------------
 
-# Read a value from the JSON # Load default values for all environment variables
 load_defaults() {
     export SYSTOWER_CRON="${SYSTOWER_CRON:-0 4 * * *}"
     export SYSTOWER_RUN_ON_START="${SYSTOWER_RUN_ON_START:-true}"
@@ -329,6 +328,9 @@ load_defaults() {
     export SYSTOWER_DOCKER_STOP_TIMEOUT="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     export SYSTOWER_DOCKER_MONITOR_ONLY="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
     export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
+    export SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS="${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-true}"
+    export SYSTOWER_DOCKER_UPDATE_DELAY="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
+    export SYSTOWER_RPI_NETWORK_IMMUNITY="${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"
     export SYSTOWER_SYSTEM_ENABLED="${SYSTOWER_SYSTEM_ENABLED:-false}"
     export SYSTOWER_SYSTEM_REBOOT="${SYSTOWER_SYSTEM_REBOOT:-false}"
     export SYSTOWER_LOG_LEVEL="${SYSTOWER_LOG_LEVEL:-info}"
@@ -359,11 +361,14 @@ print_config() {
         log_info "  Docker stop timeout:   ${SYSTOWER_DOCKER_STOP_TIMEOUT}s"
         log_info "  Docker monitor only:   ${SYSTOWER_DOCKER_MONITOR_ONLY}"
         log_info "  Docker healthcheck:    ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT}s"
+        log_info "  Protect network ctrs:  ${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS}"
+        log_info "  Update cooldown delay: ${SYSTOWER_DOCKER_UPDATE_DELAY}s"
     fi
 
     if is_true "$SYSTOWER_SYSTEM_ENABLED"; then
         log_info "  System host:           local host machine"
         log_info "  System reboot:         ${SYSTOWER_SYSTEM_REBOOT}"
+        log_info "  RPi network immunity:  ${SYSTOWER_RPI_NETWORK_IMMUNITY}"
     fi
     log_info ""
 }
@@ -383,6 +388,9 @@ validate_config() {
     local dry_run="${SYSTOWER_DRY_RUN:-false}"
     local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     local hc_timeout="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
+    local protect_net="${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-true}"
+    local update_delay="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
+    local rpi_immunity="${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"
     local log_level="${SYSTOWER_LOG_LEVEL:-info}"
 
     if ! validate_cron "$cron"; then
@@ -417,6 +425,21 @@ validate_config() {
 
     if ! is_boolean "$system_reboot"; then
         log_error "SYSTOWER_SYSTEM_REBOOT must be true or false (got: $system_reboot)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$protect_net"; then
+        log_error "SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS must be true or false (got: $protect_net)"
+        errors=$((errors + 1))
+    fi
+
+    if ! [[ "$update_delay" =~ ^[0-9]+$ ]]; then
+        log_error "SYSTOWER_DOCKER_UPDATE_DELAY must be a non-negative integer (got: $update_delay)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$rpi_immunity"; then
+        log_error "SYSTOWER_RPI_NETWORK_IMMUNITY must be true or false (got: $rpi_immunity)"
         errors=$((errors + 1))
     fi
 
