@@ -114,12 +114,15 @@ should_update_container() {
         return 1
     fi
 
-    # Skip containers mounting docker.sock (socket proxies, portainer, other updaters) unless explicitly included
-    local mounts_docker_sock
-    mounts_docker_sock=$(docker inspect --format '{{ range .Mounts }}{{ if eq .Source "/var/run/docker.sock" }}true{{ end }}{{ end }}' "$container_id" 2>/dev/null || echo "")
-    if [ "$mounts_docker_sock" = "true" ] && [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ]; then
-        log_debug "Skipping '$container_name' (mounts docker.sock - protected daemon component)"
-        return 1
+    # Skip containers mounting docker.sock (socket proxies, portainer, other updaters) if protected
+    if is_true "${SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS:-false}"; then
+        local mounts_docker_sock
+        mounts_docker_sock=$(docker inspect --format '{{ range .Mounts }}{{ if eq .Source "/var/run/docker.sock" }}true{{ end }}{{ end }}' "$container_id" 2>/dev/null || echo "")
+        if [ "$mounts_docker_sock" = "true" ] && [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ]; then
+            log_warn "Skipping '$container_name' (mounts docker.sock - protected daemon component)"
+            log_debug "To update anyway, set SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS=false or add '$container_name' to SYSTOWER_DOCKER_INCLUDE_ONLY"
+            return 1
+        fi
     fi
 
     # Protect network-sensitive / VPN containers if enabled
@@ -167,6 +170,8 @@ recreate_container() {
     container_name=$(get_container_name "$container_id")
     local image_name
     image_name=$(get_container_image "$container_id")
+    # Strip digest pin so container is recreated with the newly pulled image tag
+    image_name="${image_name%@sha256:*}"
 
     log_info "Recreating container '$container_name' with new image..."
 
@@ -529,10 +534,18 @@ run_docker_updates() {
             continue
         fi
 
+        # Strip digest pin if present (e.g. repo/image:tag@sha256:... -> repo/image:tag)
+        # Pulling a pinned sha256 digest always returns the same image; stripping it allows fetching the latest release
+        local pull_image="${image_name%@sha256:*}"
+
         # Pull latest image
-        log_debug "Pulling latest image for '$image_name'..."
-        if ! docker pull "$image_name" > /dev/null 2>&1; then
-            log_warn "Failed to pull image '$image_name'. Skipping '$container_name'."
+        log_debug "Pulling latest image for '$pull_image'..."
+        local pull_output=""
+        if ! pull_output=$(docker pull "$pull_image" 2>&1); then
+            log_warn "Failed to pull image '$pull_image'. Skipping '$container_name'."
+            local pull_err_detail
+            pull_err_detail=$(echo "$pull_output" | tail -n 2 | head -n 1)
+            [ -n "$pull_err_detail" ] && log_warn "  Reason: $pull_err_detail"
             failed=$((failed + 1))
             continue
         fi
@@ -541,7 +554,7 @@ run_docker_updates() {
         local running_id
         running_id=$(get_running_image_id "$container_id")
         local latest_id
-        latest_id=$(get_latest_image_id "$image_name")
+        latest_id=$(get_latest_image_id "$pull_image")
 
         if [ "$running_id" = "$latest_id" ]; then
             log_info "  ✓ '$container_name' is up to date."

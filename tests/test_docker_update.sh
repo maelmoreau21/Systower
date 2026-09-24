@@ -109,6 +109,12 @@ test_protect_network_containers_default_true() {
     [ "$SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS" = "true" ]
 }
 
+test_protect_socket_containers_default_false() {
+    unset SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS" = "false" ]
+}
+
 test_update_delay_default() {
     unset SYSTOWER_DOCKER_UPDATE_DELAY 2>/dev/null || true
     load_defaults

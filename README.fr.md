@@ -144,6 +144,7 @@ Systower intègre des protections natives pour éliminer ce problème :
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | Si défini, seuls ces conteneurs seront mis à jour |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Délai d'arrêt avant forçage (secondes) |
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `true` | Protéger les conteneurs VPN, DNS et host mode |
+| `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protéger les conteneurs montant `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Délai de pause (secondes) entre chaque mise à jour |
 | `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Immuniser automatiquement le réseau hôte Raspberry Pi |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Activer la mise à jour des paquets de la machine hôte |

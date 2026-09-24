@@ -144,6 +144,7 @@ Systower includes built-in safeguards:
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | If set, only these containers will be updated |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `true` | Protect VPN, DNS, and host-mode network containers |
+| `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protect containers mounting `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Cooldown pause (seconds) between container updates |
 | `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Automatically immunize Raspberry Pi host networking |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |

@@ -329,6 +329,7 @@ load_defaults() {
     export SYSTOWER_DOCKER_MONITOR_ONLY="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
     export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
     export SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS="${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-true}"
+    export SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS="${SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS:-false}"
     export SYSTOWER_DOCKER_UPDATE_DELAY="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
     export SYSTOWER_RPI_NETWORK_IMMUNITY="${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"
     export SYSTOWER_SYSTEM_ENABLED="${SYSTOWER_SYSTEM_ENABLED:-false}"
@@ -362,6 +363,7 @@ print_config() {
         log_info "  Docker monitor only:   ${SYSTOWER_DOCKER_MONITOR_ONLY}"
         log_info "  Docker healthcheck:    ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT}s"
         log_info "  Protect network ctrs:  ${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS}"
+        log_info "  Protect socket ctrs:   ${SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS}"
         log_info "  Update cooldown delay: ${SYSTOWER_DOCKER_UPDATE_DELAY}s"
     fi
 
@@ -389,6 +391,7 @@ validate_config() {
     local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     local hc_timeout="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
     local protect_net="${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-true}"
+    local protect_sock="${SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS:-false}"
     local update_delay="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
     local rpi_immunity="${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"
     local log_level="${SYSTOWER_LOG_LEVEL:-info}"
@@ -430,6 +433,11 @@ validate_config() {
 
     if ! is_boolean "$protect_net"; then
         log_error "SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS must be true or false (got: $protect_net)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$protect_sock"; then
+        log_error "SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS must be true or false (got: $protect_sock)"
         errors=$((errors + 1))
     fi
 
