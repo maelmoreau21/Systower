@@ -103,10 +103,10 @@ test_cleanup_boolean() {
     is_boolean "$SYSTOWER_DOCKER_CLEANUP"
 }
 
-test_protect_network_containers_default_true() {
+test_protect_network_containers_default_false() {
     unset SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS 2>/dev/null || true
     load_defaults
-    [ "$SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS" = "true" ]
+    [ "$SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS" = "false" ]
 }
 
 test_protect_socket_containers_default_false() {

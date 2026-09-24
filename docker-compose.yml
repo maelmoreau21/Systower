@@ -32,8 +32,8 @@ services:
       SYSTOWER_DOCKER_CLEANUP: "true"
       SYSTOWER_DOCKER_STOP_TIMEOUT: "30"
       SYSTOWER_DOCKER_MONITOR_ONLY: "false"
-      # Protect network-sensitive / VPN containers (Tailscale, Wireguard, Gluetun, Pi-hole, host network)
-      SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS: "true"
+      # Set to true only if you want to skip network-sensitive containers (Tailscale, Wireguard, Gluetun, Pi-hole, host network)
+      SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS: "false"
       # Skip containers mounting docker.sock (Portainer, Traefik, dashboards) to avoid restarting management tools
       SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS: "false"
       # Cooldown delay (in seconds) between container updates to prevent RAM/CPU spikes on Raspberry Pi

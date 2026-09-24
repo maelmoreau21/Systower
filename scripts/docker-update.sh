@@ -48,7 +48,7 @@ is_network_sensitive_container() {
     image_name=$(get_container_image "$container_id")
     local combined="${container_name,,} ${image_name,,}"
 
-    if echo "$combined" | grep -Eq 'wireguard|tailscale|gluetun|openvpn|pihole|pi-hole|adguard|cloudflared|zerotier|netmaker|nebula|tinc'; then
+    if echo "$combined" | grep -Eq 'wireguard|tailscale|gluetun|openvpn|pihole|pi-hole|adguard|technitium|cloudflared|zerotier|netmaker|nebula|tinc'; then
         return 0
     fi
 
@@ -125,8 +125,8 @@ should_update_container() {
         fi
     fi
 
-    # Protect network-sensitive / VPN containers if enabled
-    if is_true "${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-true}"; then
+    # Protect network-sensitive / VPN containers if enabled (disabled by default to allow updating all containers)
+    if is_true "${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-false}"; then
         if is_network_sensitive_container "$container_id"; then
             # If explicitly in include-only, allow it; otherwise protect host networking by skipping
             if [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ] || ! in_csv_list "$container_name" "$SYSTOWER_DOCKER_INCLUDE_ONLY"; then
@@ -162,16 +162,18 @@ should_update_container() {
 # ----------------------------------------------------------------------------
 
 # Recreate a container with the latest image while preserving full config
-# Arguments: $1 - container ID
+# Arguments: $1 - container ID, $2 - target image (optional)
 # Returns: 0 on success, 1 on failure
 recreate_container() {
     local container_id="$1"
+    local target_image="${2:-}"
     local container_name
     container_name=$(get_container_name "$container_id")
-    local image_name
-    image_name=$(get_container_image "$container_id")
-    # Strip digest pin so container is recreated with the newly pulled image tag
-    image_name="${image_name%@sha256:*}"
+    local image_name="$target_image"
+    if [ -z "$image_name" ]; then
+        image_name=$(get_container_image "$container_id")
+        image_name="${image_name%@sha256:*}"
+    fi
 
     log_info "Recreating container '$container_name' with new image..."
 
@@ -534,9 +536,24 @@ run_docker_updates() {
             continue
         fi
 
+        # Fallback if image_name is a raw sha256 hash or empty: resolve human-readable tag from image RepoTags
+        if [[ "$image_name" == sha256:* ]] || [ -z "$image_name" ]; then
+            local repo_tag
+            repo_tag=$(docker inspect --format '{{index .RepoTags 0}}' "$container_id" 2>/dev/null || echo "")
+            if [ -n "$repo_tag" ] && [ "$repo_tag" != "<none>:<none>" ]; then
+                image_name="$repo_tag"
+            fi
+        fi
+
         # Strip digest pin if present (e.g. repo/image:tag@sha256:... -> repo/image:tag)
         # Pulling a pinned sha256 digest always returns the same image; stripping it allows fetching the latest release
         local pull_image="${image_name%@sha256:*}"
+
+        # Normalize tag: if no tag is specified (e.g. "nginx" or "technitium/dns-server"), ensure ":latest" is explicit
+        local tag_part="${pull_image##*/}"
+        if [[ "$tag_part" != *:* ]]; then
+            pull_image="${pull_image}:latest"
+        fi
 
         # Pull latest image
         log_debug "Pulling latest image for '$pull_image'..."
@@ -556,7 +573,8 @@ run_docker_updates() {
         local latest_id
         latest_id=$(get_latest_image_id "$pull_image")
 
-        if [ "$running_id" = "$latest_id" ]; then
+        # Check if up to date: image IDs match AND docker pull did not report downloading a newer image
+        if [ "$running_id" = "$latest_id" ] && ! echo "$pull_output" | grep -qi "Downloaded newer image"; then
             log_info "  ✓ '$container_name' is up to date."
             up_to_date=$((up_to_date + 1))
             continue
@@ -581,8 +599,8 @@ run_docker_updates() {
         # Store old image ID for cleanup
         local old_image_id="$running_id"
 
-        # Recreate container directly via Docker API
-        if recreate_container "$container_id"; then
+        # Recreate container directly via Docker API using the freshly pulled image
+        if recreate_container "$container_id" "$pull_image"; then
             updated=$((updated + 1))
 
             # Clean up old image
