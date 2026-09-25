@@ -536,10 +536,14 @@ run_docker_updates() {
             continue
         fi
 
+        # Get the ID of the image currently running
+        local running_id
+        running_id=$(get_running_image_id "$container_id")
+
         # Fallback if image_name is a raw sha256 hash or empty: resolve human-readable tag from image RepoTags
         if [[ "$image_name" == sha256:* ]] || [ -z "$image_name" ]; then
             local repo_tag
-            repo_tag=$(docker inspect --format '{{index .RepoTags 0}}' "$container_id" 2>/dev/null || echo "")
+            repo_tag=$(docker image inspect --format '{{index .RepoTags 0}}' "$running_id" 2>/dev/null || echo "")
             if [ -n "$repo_tag" ] && [ "$repo_tag" != "<none>:<none>" ]; then
                 image_name="$repo_tag"
             fi
@@ -568,8 +572,6 @@ run_docker_updates() {
         fi
 
         # Compare image IDs
-        local running_id
-        running_id=$(get_running_image_id "$container_id")
         local latest_id
         latest_id=$(get_latest_image_id "$pull_image")
 
