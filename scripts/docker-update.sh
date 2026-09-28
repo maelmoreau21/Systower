@@ -55,6 +55,51 @@ is_network_sensitive_container() {
     return 1
 }
 
+# Check if a container is Systower itself
+# Arguments: $1 - container ID
+# Returns: 0 if self, 1 otherwise
+is_self_container() {
+    local container_id="$1"
+    local container_name
+    container_name=$(get_container_name "$container_id")
+    local image_name
+    image_name=$(get_container_image "$container_id")
+
+    # 1. Match by container name (exact, substring or env)
+    local cname_lower="${container_name,,}"
+    if [ "$container_name" = "systower" ] || [ "$container_name" = "${SYSTOWER_CONTAINER_NAME:-systower}" ] || [[ "$cname_lower" == *"systower"* ]]; then
+        return 0
+    fi
+
+    # 2. Match by compose service name label
+    local compose_service
+    compose_service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container_id" 2>/dev/null || echo "")
+    if [ -n "$compose_service" ] && [[ "${compose_service,,}" == *"systower"* ]]; then
+        return 0
+    fi
+
+    # 3. Match by cgroups (v1 / v2 / systemd / cgroupfs)
+    local self_cgroup_id
+    self_cgroup_id=$(cat /proc/self/cgroup /proc/1/cpuset 2>/dev/null | grep -o '[0-9a-f]\{64\}' | head -n 1 || echo "")
+    if [ -n "$self_cgroup_id" ] && [ "$container_id" = "$self_cgroup_id" ]; then
+        return 0
+    fi
+
+    # 4. Match by container hostname (short ID)
+    local host_name
+    host_name=$(hostname 2>/dev/null || echo "")
+    if [ -n "$host_name" ] && [ ${#host_name} -ge 12 ] && [[ "$container_id" == "$host_name"* ]]; then
+        return 0
+    fi
+
+    # 5. Match by image name
+    if [[ "${image_name,,}" == *"systower"* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Determine if a container should be updated
 # Arguments: $1 - container ID
 # Returns: 0 if should update, 1 if should skip
@@ -65,41 +110,9 @@ should_update_container() {
     local image_name
     image_name=$(get_container_image "$container_id")
 
-    # Never update Systower itself
-    # 1. Match by container name (exact, substring or env)
-    local cname_lower="${container_name,,}"
-    if [ "$container_name" = "systower" ] || [ "$container_name" = "${SYSTOWER_CONTAINER_NAME:-systower}" ] || [[ "$cname_lower" == *"systower"* ]]; then
-        log_debug "Skipping self (Systower container name match: $container_name)"
-        return 1
-    fi
-
-    # 2. Match by compose service name label
-    local compose_service
-    compose_service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container_id" 2>/dev/null || echo "")
-    if [ -n "$compose_service" ] && [[ "${compose_service,,}" == *"systower"* ]]; then
-        log_debug "Skipping self (Systower compose service label match: $compose_service)"
-        return 1
-    fi
-
-    # 3. Match by cgroups (v1 / v2 / systemd / cgroupfs)
-    local self_cgroup_id
-    self_cgroup_id=$(cat /proc/self/cgroup /proc/1/cpuset 2>/dev/null | grep -o '[0-9a-f]\{64\}' | head -n 1 || echo "")
-    if [ -n "$self_cgroup_id" ] && [ "$container_id" = "$self_cgroup_id" ]; then
-        log_debug "Skipping self (Systower cgroup ID match)"
-        return 1
-    fi
-
-    # 4. Match by container hostname (short ID)
-    local host_name
-    host_name=$(hostname 2>/dev/null || echo "")
-    if [ -n "$host_name" ] && [ ${#host_name} -ge 12 ] && [[ "$container_id" == "$host_name"* ]]; then
-        log_debug "Skipping self (Systower hostname match)"
-        return 1
-    fi
-
-    # 5. Match by image name
-    if [[ "${image_name,,}" == *"systower"* ]] && [ "${SYSTOWER_UPDATE_SELF:-false}" != "true" ]; then
-        log_debug "Skipping self (Systower image match: $image_name)"
+    # Skip Systower itself during regular loop (handled at the end of the cycle if SYSTOWER_UPDATE_SELF=true)
+    if is_self_container "$container_id"; then
+        log_debug "Skipping self in main loop (Systower self-update handled separately at end of cycle)"
         return 1
     fi
 
@@ -130,7 +143,7 @@ should_update_container() {
         if is_network_sensitive_container "$container_id"; then
             # If explicitly in include-only, allow it; otherwise protect host networking by skipping
             if [ -z "${SYSTOWER_DOCKER_INCLUDE_ONLY:-}" ] || ! in_csv_list "$container_name" "$SYSTOWER_DOCKER_INCLUDE_ONLY"; then
-                log_warn "Skipping '$container_name' (protected network/VPN container — prevents host route/DNS drops)"
+                log_warn "Skipping '$container_name' (protected network/DNS container — set SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS=false to update it)"
                 log_debug "To update anyway, add '$container_name' to SYSTOWER_DOCKER_INCLUDE_ONLY or set SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS=false"
                 return 1
             fi
@@ -225,17 +238,26 @@ recreate_container() {
         [ -n "$primary_mac" ] && run_args+=("--mac-address" "$primary_mac")
     fi
 
-    # Port bindings (with IPv6 bracket support)
+    # Port bindings (with IPv6 bracket support and IPv4 dual-stack deduplication)
     if [ "$network_mode" != "host" ] && [[ "$network_mode" != container:* ]]; then
         local port_bindings
         port_bindings=$(echo "$inspect_json" | jq -r '
             .[0].HostConfig.PortBindings // {} | to_entries[] |
             .key as $container_port |
-            .value[]? |
+            .value as $bindings |
+            $bindings[]? |
+            select(.HostPort != null and .HostPort != "") |
+            select(
+                if .HostIp == "::" then
+                    ($bindings | any(.HostIp == "0.0.0.0" or .HostIp == "")) | not
+                else
+                    true
+                end
+            ) |
             (if .HostIp != "" and .HostIp != "0.0.0.0" then
                 (if (.HostIp | contains(":")) then "[" + .HostIp + "]:" else .HostIp + ":" end)
              else "" end) +
-            (if .HostPort != "" then .HostPort + ":" else "" end) +
+            .HostPort + ":" +
             $container_port
         ' 2>/dev/null || echo "")
         while IFS= read -r binding; do
@@ -266,7 +288,13 @@ recreate_container() {
 
     # Labels (null-delimited for safe multiline strings)
     while IFS= read -r -d '' label; do
-        [ -n "$label" ] && run_args+=("--label" "$label")
+        if [ -n "$label" ]; then
+            # Skip old image hash label generated by compose
+            if [[ "$label" == com.docker.compose.image=sha256:* ]]; then
+                continue
+            fi
+            run_args+=("--label" "$label")
+        fi
     done < <(echo "$inspect_json" | jq -j '.[0].Config.Labels // {} | to_entries[] | (.key + "=" + .value) + "\u0000"' 2>/dev/null || true)
 
     # Hostname & Domainname
@@ -360,21 +388,47 @@ recreate_container() {
         [ -n "$sysctl" ] && run_args+=("--sysctl" "$sysctl")
     done <<< "$sysctls"
 
-    # Extract Entrypoint array properly
-    local entrypoint_bin=""
-    local -a entrypoint_args=()
-    entrypoint_bin=$(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint[0] // empty' 2>/dev/null || echo "")
-    if [ -n "$entrypoint_bin" ]; then
-        while IFS= read -r arg; do
-            [ -n "$arg" ] && entrypoint_args+=("$arg")
-        done < <(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint[1:][]?' 2>/dev/null || true)
+    # Check if Entrypoint / Cmd were explicitly customized on the container or inherited from image
+    local running_image_id
+    running_image_id=$(get_running_image_id "$container_id")
+    local orig_image_entrypoint orig_image_cmd
+    orig_image_entrypoint=$(docker image inspect --format '{{json .Config.Entrypoint}}' "$running_image_id" 2>/dev/null || echo "null")
+    orig_image_cmd=$(docker image inspect --format '{{json .Config.Cmd}}' "$running_image_id" 2>/dev/null || echo "null")
+
+    local container_entrypoint container_cmd
+    container_entrypoint=$(echo "$inspect_json" | jq -c '.[0].Config.Entrypoint // null' 2>/dev/null || echo "null")
+    container_cmd=$(echo "$inspect_json" | jq -c '.[0].Config.Cmd // null' 2>/dev/null || echo "null")
+
+    local custom_entrypoint=false
+    local custom_cmd=false
+
+    if [ "$container_entrypoint" != "null" ] && [ "$container_entrypoint" != "$orig_image_entrypoint" ]; then
+        custom_entrypoint=true
     fi
 
-    # Extract Command array properly
+    if [ "$container_cmd" != "null" ] && [ "$container_cmd" != "$orig_image_cmd" ]; then
+        custom_cmd=true
+    fi
+
+    # Extract Entrypoint array only if custom
+    local entrypoint_bin=""
+    local -a entrypoint_args=()
+    if [ "$custom_entrypoint" = "true" ]; then
+        entrypoint_bin=$(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint[0] // empty' 2>/dev/null || echo "")
+        if [ -n "$entrypoint_bin" ]; then
+            while IFS= read -r arg; do
+                [ -n "$arg" ] && entrypoint_args+=("$arg")
+            done < <(echo "$inspect_json" | jq -r '.[0].Config.Entrypoint[1:][]?' 2>/dev/null || true)
+        fi
+    fi
+
+    # Extract Command array only if custom
     local -a cmd_args=()
-    while IFS= read -r arg; do
-        [ -n "$arg" ] && cmd_args+=("$arg")
-    done < <(echo "$inspect_json" | jq -r '.[0].Config.Cmd[]?' 2>/dev/null || true)
+    if [ "$custom_cmd" = "true" ]; then
+        while IFS= read -r arg; do
+            [ -n "$arg" ] && cmd_args+=("$arg")
+        done < <(echo "$inspect_json" | jq -r '.[0].Config.Cmd[]?' 2>/dev/null || true)
+    fi
 
     # Stop timeout
     local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
@@ -409,19 +463,19 @@ recreate_container() {
     local -a full_cmd=("docker" "run" "-d")
     full_cmd+=("${run_args[@]}")
 
-    if [ -n "$entrypoint_bin" ]; then
+    if [ "$custom_entrypoint" = "true" ] && [ -n "$entrypoint_bin" ]; then
         full_cmd+=("--entrypoint" "$entrypoint_bin")
     fi
 
     full_cmd+=("$image_name")
 
-    # Append additional entrypoint arguments (e.g. "--")
-    if [ "${#entrypoint_args[@]}" -gt 0 ]; then
+    # Append additional entrypoint arguments (e.g. "--") only if custom
+    if [ "$custom_entrypoint" = "true" ] && [ "${#entrypoint_args[@]}" -gt 0 ]; then
         full_cmd+=("${entrypoint_args[@]}")
     fi
 
-    # Append command arguments
-    if [ "${#cmd_args[@]}" -gt 0 ]; then
+    # Append command arguments only if custom
+    if [ "$custom_cmd" = "true" ] && [ "${#cmd_args[@]}" -gt 0 ]; then
         full_cmd+=("${cmd_args[@]}")
     fi
 
@@ -491,6 +545,159 @@ recreate_container() {
 }
 
 # ----------------------------------------------------------------------------
+# Systower Self-Update
+# ----------------------------------------------------------------------------
+
+# Update Systower container itself using a detached helper container
+# Arguments: $1 - Systower container ID
+# Returns: 0 on success/up-to-date, 1 on failure
+update_systower_self() {
+    local self_id="$1"
+    local self_name
+    self_name=$(get_container_name "$self_id")
+    local self_image
+    self_image=$(get_container_image "$self_id")
+    local running_id
+    running_id=$(get_running_image_id "$self_id")
+
+    log_section "🔄 Systower Self-Update"
+    log_info "Checking for Systower updates: $self_name ($self_image)"
+
+    # Fallback if image_name is raw sha256 or empty
+    if [[ "$self_image" == sha256:* ]] || [ -z "$self_image" ]; then
+        local repo_tag
+        repo_tag=$(docker image inspect --format '{{index .RepoTags 0}}' "$running_id" 2>/dev/null || echo "")
+        if [ -n "$repo_tag" ] && [ "$repo_tag" != "<none>:<none>" ]; then
+            self_image="$repo_tag"
+        fi
+    fi
+
+    local pull_image="${self_image%@sha256:*}"
+    local tag_part="${pull_image##*/}"
+    if [[ "$tag_part" != *:* ]]; then
+        pull_image="${pull_image}:latest"
+    fi
+
+    log_debug "Pulling latest Systower image '$pull_image'..."
+    local pull_output=""
+    if ! pull_output=$(docker pull "$pull_image" 2>&1); then
+        log_warn "Failed to pull latest Systower image '$pull_image'."
+        return 1
+    fi
+
+    local latest_id
+    latest_id=$(get_latest_image_id "$pull_image")
+
+    if [ "$running_id" = "$latest_id" ] && ! echo "$pull_output" | grep -qi "Downloaded newer image"; then
+        log_info "  ✓ Systower is up to date."
+        return 0
+    fi
+
+    log_info "  ↑ Update available for Systower ($self_name)!"
+
+    if is_true "${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"; then
+        log_info "  👁 Monitor mode: Systower update detected but not applied."
+        return 0
+    fi
+
+    if is_true "${SYSTOWER_DRY_RUN:-false}"; then
+        log_info "  🔍 Dry run: would self-update Systower."
+        return 0
+    fi
+
+    log_info "🚀 Preparing self-update for '$self_name'..."
+    notify "Systower Self-Update" "🔄 Systower is updating itself to the latest image ($pull_image)..." "warning"
+
+    # Extract full inspect json
+    local inspect_json
+    inspect_json=$(docker inspect "$self_id")
+
+    # Build run arguments matching current container
+    local -a run_args=()
+    run_args+=("--name" "$self_name")
+
+    local restart_policy
+    restart_policy=$(echo "$inspect_json" | jq -r '.[0].HostConfig.RestartPolicy.Name // empty' 2>/dev/null || echo "")
+    [ -n "$restart_policy" ] && [ "$restart_policy" != "no" ] && run_args+=("--restart" "$restart_policy")
+
+    # Volume mounts (must include /var/run/docker.sock)
+    local binds
+    binds=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Binds[]?' 2>/dev/null || echo "")
+    while IFS= read -r bind; do
+        [ -n "$bind" ] && run_args+=("-v" "$bind")
+    done <<< "$binds"
+
+    # Named volume mounts not already in binds
+    local volume_mounts
+    volume_mounts=$(echo "$inspect_json" | jq -r '
+        .[0].Mounts[]? | select(.Type == "volume" and .Name != null and .Name != "") |
+        .Name + ":" + .Destination + (if .RW == false then ":ro" else "" end)
+    ' 2>/dev/null || echo "")
+    while IFS= read -r mount; do
+        if [ -n "$mount" ]; then
+            if ! printf '%s\n' "$binds" | grep -Fxq "$mount"; then
+                run_args+=("-v" "$mount")
+            fi
+        fi
+    done <<< "$volume_mounts"
+
+    # Environment variables
+    while IFS= read -r -d '' env_var; do
+        [ -n "$env_var" ] && run_args+=("-e" "$env_var")
+    done < <(echo "$inspect_json" | jq -j '.[0].Config.Env[]? // empty | . + "\u0000"' 2>/dev/null || true)
+
+    # Network mode
+    local network_mode
+    network_mode=$(echo "$inspect_json" | jq -r '.[0].HostConfig.NetworkMode // empty' 2>/dev/null || echo "")
+    if [ -n "$network_mode" ] && [ "$network_mode" != "default" ] && [ "$network_mode" != "bridge" ]; then
+        run_args+=("--network" "$network_mode")
+    fi
+
+    # Privileged and PID mode
+    local privileged
+    privileged=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Privileged // false' 2>/dev/null || echo "false")
+    [ "$privileged" = "true" ] && run_args+=("--privileged")
+
+    local pid_mode
+    pid_mode=$(echo "$inspect_json" | jq -r '.[0].HostConfig.PidMode // empty' 2>/dev/null || echo "")
+    [ -n "$pid_mode" ] && run_args+=("--pid" "$pid_mode")
+
+    # Labels (exclude old image hash)
+    while IFS= read -r -d '' label; do
+        if [ -n "$label" ] && [[ "$label" != com.docker.compose.image=sha256:* ]]; then
+            run_args+=("--label" "$label")
+        fi
+    done < <(echo "$inspect_json" | jq -j '.[0].Config.Labels // {} | to_entries[] | (.key + "=" + .value) + "\u0000"' 2>/dev/null || true)
+
+    # Launch background updater helper container using the newly pulled image
+    local helper_name="systower_self_updater_$$"
+    log_info "Spawning detached self-update helper container..."
+
+    local run_cmd="docker run -d $(printf '%q ' "${run_args[@]}") $pull_image"
+
+    docker run -d \
+        --name "$helper_name" \
+        --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        "$pull_image" \
+        sh -c "
+            sleep 2
+            echo '[Systower Self-Update] Stopping old container $self_name...'
+            docker stop -t 15 '$self_name' > /dev/null 2>&1 || docker kill '$self_name' > /dev/null 2>&1 || true
+            docker rm -f '$self_name' > /dev/null 2>&1 || true
+            echo '[Systower Self-Update] Starting updated Systower container...'
+            $run_cmd
+            echo '[Systower Self-Update] Complete!'
+        " > /dev/null 2>&1 || {
+            log_error "Failed to spawn self-update helper container."
+            return 1
+        }
+
+    log_info "✅ Self-update helper dispatched. Systower will restart with the new image."
+    return 0
+}
+
+# ----------------------------------------------------------------------------
 # Main update loop
 # ----------------------------------------------------------------------------
 
@@ -518,6 +725,7 @@ run_docker_updates() {
     local skipped=0
     local failed=0
     local up_to_date=0
+    local self_container_id=""
 
     while IFS= read -r container_id; do
         [ -z "$container_id" ] && continue
@@ -529,6 +737,13 @@ run_docker_updates() {
         image_name=$(get_container_image "$container_id")
 
         log_info "Checking: $container_name ($image_name)"
+
+        # Detect Systower container: postpone update to the self-update phase at cycle end
+        if is_self_container "$container_id"; then
+            self_container_id="$container_id"
+            log_debug "Found Systower container '$container_name' — deferred to self-update phase"
+            continue
+        fi
 
         # Apply filters
         if ! should_update_container "$container_id"; then
@@ -559,16 +774,20 @@ run_docker_updates() {
             pull_image="${pull_image}:latest"
         fi
 
-        # Pull latest image
+        # Pull latest image (with 1 retry on transient network/DNS timeout)
         log_debug "Pulling latest image for '$pull_image'..."
         local pull_output=""
         if ! pull_output=$(docker pull "$pull_image" 2>&1); then
-            log_warn "Failed to pull image '$pull_image'. Skipping '$container_name'."
-            local pull_err_detail
-            pull_err_detail=$(echo "$pull_output" | tail -n 2 | head -n 1)
-            [ -n "$pull_err_detail" ] && log_warn "  Reason: $pull_err_detail"
-            failed=$((failed + 1))
-            continue
+            log_debug "Pull failed for '$pull_image', retrying once after 3s..."
+            sleep 3
+            if ! pull_output=$(docker pull "$pull_image" 2>&1); then
+                log_warn "Failed to pull image '$pull_image'. Skipping '$container_name'."
+                local pull_err_detail
+                pull_err_detail=$(echo "$pull_output" | tail -n 2 | head -n 1)
+                [ -n "$pull_err_detail" ] && log_warn "  Reason: $pull_err_detail"
+                failed=$((failed + 1))
+                continue
+            fi
         fi
 
         # Compare image IDs
@@ -632,6 +851,11 @@ run_docker_updates() {
     log_info "  Skipped:            $skipped"
     log_info "  Failed:             $failed"
     log_info ""
+
+    # Self-update phase: update Systower itself if enabled
+    if [ -n "$self_container_id" ] && is_true "${SYSTOWER_UPDATE_SELF:-true}"; then
+        update_systower_self "$self_container_id" || true
+    fi
 
     # Export for summary notification
     export _DOCKER_UPDATED="$updated"

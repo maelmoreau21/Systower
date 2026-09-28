@@ -126,3 +126,14 @@ test_rpi_immunity_default_true() {
     load_defaults
     [ "$SYSTOWER_RPI_NETWORK_IMMUNITY" = "true" ]
 }
+
+test_update_self_default_true() {
+    unset SYSTOWER_UPDATE_SELF 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_UPDATE_SELF" = "true" ]
+}
+
+test_update_self_boolean() {
+    load_defaults
+    is_boolean "$SYSTOWER_UPDATE_SELF"
+}

@@ -26,8 +26,9 @@ test_healthcheck_script_loads() {
 }
 
 test_healthcheck_timeout_default() {
+    unset SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT 2>/dev/null || true
     load_defaults
-    [ "${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT}" = "30" ]
+    [ "${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT}" = "60" ]
 }
 
 test_healthcheck_timeout_custom() {

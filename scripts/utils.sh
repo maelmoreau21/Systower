@@ -327,10 +327,11 @@ load_defaults() {
     export SYSTOWER_DOCKER_CLEANUP="${SYSTOWER_DOCKER_CLEANUP:-true}"
     export SYSTOWER_DOCKER_STOP_TIMEOUT="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     export SYSTOWER_DOCKER_MONITOR_ONLY="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
-    export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
+    export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-60}"
     export SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS="${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-false}"
     export SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS="${SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS:-false}"
     export SYSTOWER_DOCKER_UPDATE_DELAY="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
+    export SYSTOWER_UPDATE_SELF="${SYSTOWER_UPDATE_SELF:-true}"
     export SYSTOWER_RPI_NETWORK_IMMUNITY="${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"
     export SYSTOWER_SYSTEM_ENABLED="${SYSTOWER_SYSTEM_ENABLED:-false}"
     export SYSTOWER_SYSTEM_REBOOT="${SYSTOWER_SYSTEM_REBOOT:-false}"
@@ -350,6 +351,7 @@ print_config() {
     log_info "  Schedule (cron):       ${SYSTOWER_CRON}"
     log_info "  Run on start:          ${SYSTOWER_RUN_ON_START}"
     log_info "  Docker updates:        ${SYSTOWER_DOCKER_ENABLED}"
+    log_info "  Auto-update Systower:  ${SYSTOWER_UPDATE_SELF}"
     log_info "  System updates:        ${SYSTOWER_SYSTEM_ENABLED}"
     log_info "  Notifications:         ${SYSTOWER_NOTIFY_ENABLED}"
     log_info "  Log level:             ${SYSTOWER_LOG_LEVEL}"
@@ -389,10 +391,11 @@ validate_config() {
     local notify_enabled="${SYSTOWER_NOTIFY_ENABLED:-false}"
     local dry_run="${SYSTOWER_DRY_RUN:-false}"
     local stop_timeout="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
-    local hc_timeout="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}"
+    local hc_timeout="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-60}"
     local protect_net="${SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS:-false}"
     local protect_sock="${SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS:-false}"
     local update_delay="${SYSTOWER_DOCKER_UPDATE_DELAY:-2}"
+    local update_self="${SYSTOWER_UPDATE_SELF:-true}"
     local rpi_immunity="${SYSTOWER_RPI_NETWORK_IMMUNITY:-true}"
     local log_level="${SYSTOWER_LOG_LEVEL:-info}"
 
@@ -443,6 +446,11 @@ validate_config() {
 
     if ! [[ "$update_delay" =~ ^[0-9]+$ ]]; then
         log_error "SYSTOWER_DOCKER_UPDATE_DELAY must be a non-negative integer (got: $update_delay)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$update_self"; then
+        log_error "SYSTOWER_UPDATE_SELF must be true or false (got: $update_self)"
         errors=$((errors + 1))
     fi
 

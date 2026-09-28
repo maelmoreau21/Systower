@@ -88,12 +88,21 @@ wait_for_healthy() {
     final_status=$(get_health_status "$container")
 
     if [ "$final_status" = "starting" ] || [ "$final_status" = "none" ]; then
-        # If no healthcheck or still starting, check if at least running
+        # If no healthcheck defined, check if running
         if [ "$final_status" = "none" ]; then
             log_info "  ✓ Container '$container' is running (no healthcheck defined)"
             return 0
         fi
-        log_warn "  Container '$container' still starting after ${timeout}s"
+        # If still in starting status, verify if the container is running stably (not crashing or restarting)
+        local state
+        state=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "unknown")
+        local restarts
+        restarts=$(docker inspect --format='{{.RestartCount}}' "$container" 2>/dev/null || echo "0")
+        if [ "$state" = "running" ] && [ "$restarts" -eq 0 ]; then
+            log_info "  ✓ Container '$container' is running stably (healthcheck warmup period continues after ${timeout}s)"
+            return 0
+        fi
+        log_warn "  Container '$container' still starting after ${timeout}s (state: $state, restarts: $restarts)"
         return 1
     fi
 
@@ -128,7 +137,7 @@ basic_health_check() {
 # Returns: 0 if healthy, 1 if not
 check_container_health() {
     local container="$1"
-    local timeout="${2:-${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-30}}"
+    local timeout="${2:-${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-60}}"
 
     log_info "  🏥 Running health check on '$container'..."
 
