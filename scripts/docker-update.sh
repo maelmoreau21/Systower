@@ -673,7 +673,8 @@ update_systower_self() {
     local helper_name="systower_self_updater_$$"
     log_info "Spawning detached self-update helper container..."
 
-    local run_cmd="docker run -d $(printf '%q ' "${run_args[@]}") $pull_image"
+    local run_cmd
+    run_cmd="docker run -d $(printf '%q ' "${run_args[@]}") $pull_image"
 
     docker run -d \
         --name "$helper_name" \
