@@ -98,7 +98,8 @@ wait_for_healthy() {
         state=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "unknown")
         local restarts
         restarts=$(docker inspect --format='{{.RestartCount}}' "$container" 2>/dev/null || echo "0")
-        if [ "$state" = "running" ] && [ "$restarts" -eq 0 ]; then
+        restarts="${restarts:-0}"
+        if [ "$state" = "running" ] && [[ "$restarts" =~ ^[0-9]+$ ]] && [ "$restarts" -eq 0 ]; then
             log_info "  ✓ Container '$container' is running stably (healthcheck warmup period continues after ${timeout}s)"
             return 0
         fi

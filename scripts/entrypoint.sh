@@ -26,7 +26,9 @@ setup_cron() {
     : > "$env_file"
     chmod 600 "$env_file" 2>/dev/null || true
 
-    while IFS='=' read -r name value; do
+    while IFS= read -r line; do
+        local name="${line%%=*}"
+        local value="${line#*=}"
         if [[ "$name" =~ ^SYSTOWER_ ]] || [ "$name" = "TZ" ] || [ "$name" = "PATH" ]; then
             printf 'export %s=%q\n' "$name" "$value" >> "$env_file"
         fi

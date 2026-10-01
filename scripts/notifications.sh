@@ -26,7 +26,14 @@ build_notification() {
     local timestamp
     timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-    echo "{\"event\":\"${event_type}\",\"title\":\"${title}\",\"message\":\"${message}\",\"status\":\"${status}\",\"timestamp\":\"${timestamp}\",\"hostname\":\"$(hostname)\"}"
+    jq -n \
+        --arg event "$event_type" \
+        --arg title "$title" \
+        --arg message "$message" \
+        --arg status "$status" \
+        --arg ts "$timestamp" \
+        --arg host "$(hostname 2>/dev/null || echo 'unknown')" \
+        '{event: $event, title: $title, message: $message, status: $status, timestamp: $ts, hostname: $host}'
 }
 
 # Get emoji for status
@@ -68,18 +75,13 @@ send_discord() {
     color=$(status_color "$status")
 
     local payload
-    payload=$(cat <<EOF
-{
-    "embeds": [{
-        "title": "${emoji} ${title}",
-        "description": "${message}",
-        "color": ${color},
-        "footer": {"text": "Systower v${SYSTOWER_VERSION}"},
-        "timestamp": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    }]
-}
-EOF
-)
+    payload=$(jq -n \
+        --arg title "${emoji} ${title}" \
+        --arg desc "$message" \
+        --argjson color "$color" \
+        --arg footer "Systower v${SYSTOWER_VERSION}" \
+        --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        '{embeds: [{title: $title, description: $desc, color: $color, footer: {text: $footer}, timestamp: $ts}]}')
 
     if curl -s -o /dev/null -w "%{http_code}" \
         -H "Content-Type: application/json" \
@@ -104,25 +106,15 @@ send_slack() {
     emoji=$(status_emoji "$status")
 
     local payload
-    payload=$(cat <<EOF
-{
-    "blocks": [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": "${emoji} ${title}"}
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "${message}"}
-        },
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "Systower v${SYSTOWER_VERSION} • $(date '+%Y-%m-%d %H:%M:%S')"}]
-        }
-    ]
-}
-EOF
-)
+    payload=$(jq -n \
+        --arg title "${emoji} ${title}" \
+        --arg message "$message" \
+        --arg footer "Systower v${SYSTOWER_VERSION} • $(date '+%Y-%m-%d %H:%M:%S')" \
+        '{blocks: [
+            {type: "header", text: {type: "plain_text", text: $title}},
+            {type: "section", text: {type: "mrkdwn", text: $message}},
+            {type: "context", elements: [{type: "mrkdwn", text: $footer}]}
+        ]}')
 
     if curl -s -o /dev/null -w "%{http_code}" \
         -H "Content-Type: application/json" \

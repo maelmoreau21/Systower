@@ -286,6 +286,13 @@ recreate_container() {
         fi
     done <<< "$volume_mounts"
 
+    # Tmpfs mounts
+    local tmpfs_mounts
+    tmpfs_mounts=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Tmpfs // {} | to_entries[] | .key + (if .value != "" then ":" + .value else "" end)' 2>/dev/null || echo "")
+    while IFS= read -r tmpfs_entry; do
+        [ -n "$tmpfs_entry" ] && run_args+=("--tmpfs" "$tmpfs_entry")
+    done <<< "$tmpfs_mounts"
+
     # Labels (null-delimited for safe multiline strings)
     while IFS= read -r -d '' label; do
         if [ -n "$label" ]; then
@@ -302,7 +309,10 @@ recreate_container() {
     hostname_val=$(echo "$inspect_json" | jq -r '.[0].Config.Hostname // empty' 2>/dev/null || echo "")
     local domainname
     domainname=$(echo "$inspect_json" | jq -r '.[0].Config.Domainname // empty' 2>/dev/null || echo "")
-    [ -n "$hostname_val" ] && run_args+=("--hostname" "$hostname_val")
+    # Only preserve hostname if it was explicitly set (not the auto-generated container short ID)
+    if [ -n "$hostname_val" ] && [ "$hostname_val" != "${container_id:0:12}" ]; then
+        run_args+=("--hostname" "$hostname_val")
+    fi
     [ -n "$domainname" ] && run_args+=("--domainname" "$domainname")
 
     # Working directory
@@ -388,6 +398,65 @@ recreate_container() {
         [ -n "$sysctl" ] && run_args+=("--sysctl" "$sysctl")
     done <<< "$sysctls"
 
+    # Read-only root filesystem
+    local readonly_rootfs
+    readonly_rootfs=$(echo "$inspect_json" | jq -r '.[0].HostConfig.ReadonlyRootfs' 2>/dev/null || echo "false")
+    [ "$readonly_rootfs" = "true" ] && run_args+=("--read-only")
+
+    # Init process
+    local init_flag
+    init_flag=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Init // false' 2>/dev/null || echo "false")
+    [ "$init_flag" = "true" ] && run_args+=("--init")
+
+    # IPC mode (preserve only if host or container-shared)
+    local ipc_mode
+    ipc_mode=$(echo "$inspect_json" | jq -r '.[0].HostConfig.IpcMode // empty' 2>/dev/null || echo "")
+    if [ -n "$ipc_mode" ] && { [ "$ipc_mode" = "host" ] || [[ "$ipc_mode" == container:* ]]; }; then
+        run_args+=("--ipc" "$ipc_mode")
+    fi
+
+    # Security options (seccomp, apparmor, no-new-privileges)
+    local security_opts
+    security_opts=$(echo "$inspect_json" | jq -r '.[0].HostConfig.SecurityOpt[]?' 2>/dev/null || echo "")
+    while IFS= read -r secopt; do
+        [ -n "$secopt" ] && run_args+=("--security-opt" "$secopt")
+    done <<< "$security_opts"
+
+    # Ulimits
+    local ulimits
+    ulimits=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Ulimits[]? | .Name + "=" + (.Soft | tostring) + ":" + (.Hard | tostring)' 2>/dev/null || echo "")
+    while IFS= read -r ulimit_val; do
+        [ -n "$ulimit_val" ] && run_args+=("--ulimit" "$ulimit_val")
+    done <<< "$ulimits"
+
+    # Log configuration (preserve non-default driver or custom options)
+    local log_driver
+    log_driver=$(echo "$inspect_json" | jq -r '.[0].HostConfig.LogConfig.Type // empty' 2>/dev/null || echo "")
+    local log_opts_count
+    log_opts_count=$(echo "$inspect_json" | jq -r '.[0].HostConfig.LogConfig.Config // {} | length' 2>/dev/null || echo "0")
+    if [ -n "$log_driver" ] && { [ "$log_driver" != "json-file" ] || [ "$log_opts_count" -gt 0 ]; }; then
+        run_args+=("--log-driver" "$log_driver")
+        local log_opts
+        log_opts=$(echo "$inspect_json" | jq -r '.[0].HostConfig.LogConfig.Config // {} | to_entries[] | .key + "=" + .value' 2>/dev/null || echo "")
+        while IFS= read -r log_opt; do
+            [ -n "$log_opt" ] && run_args+=("--log-opt" "$log_opt")
+        done <<< "$log_opts"
+    fi
+
+    # Additional groups
+    local group_adds
+    group_adds=$(echo "$inspect_json" | jq -r '.[0].HostConfig.GroupAdd[]?' 2>/dev/null || echo "")
+    while IFS= read -r grp; do
+        [ -n "$grp" ] && run_args+=("--group-add" "$grp")
+    done <<< "$group_adds"
+
+    # Runtime (e.g. nvidia for GPU passthrough)
+    local runtime
+    runtime=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Runtime // empty' 2>/dev/null || echo "")
+    if [ -n "$runtime" ] && [ "$runtime" != "runc" ]; then
+        run_args+=("--runtime" "$runtime")
+    fi
+
     # Check if Entrypoint / Cmd were explicitly customized on the container or inherited from image
     local running_image_id
     running_image_id=$(get_running_image_id "$container_id")
@@ -457,6 +526,8 @@ recreate_container() {
         while IFS= read -r net; do
             [ -n "$net" ] && docker network disconnect "$net" "$backup_name" > /dev/null 2>&1 || true
         done <<< "$extra_networks"
+        # Allow Docker daemon to fully release network endpoints and IPAM allocations
+        sleep 1
     fi
 
     # Build the run command
@@ -506,11 +577,22 @@ recreate_container() {
 
             # Instant Rollback: restore backup container
             log_warn "🔄 Rolling back '$container_name' to previous container state..."
-            docker rm -f "$container_name" > /dev/null 2>&1 || true
-            docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+            # Cleanly disconnect new container from networks before removal (prevents Libnetwork panic)
             if [ -n "$extra_networks" ]; then
                 while IFS= read -r net; do
-                    [ -n "$net" ] && docker network connect "$net" "$container_name" > /dev/null 2>&1 || true
+                    [ -n "$net" ] && docker network disconnect "$net" "$container_name" > /dev/null 2>&1 || true
+                done <<< "$extra_networks"
+            fi
+            docker rm -f "$container_name" > /dev/null 2>&1 || true
+            # Allow Docker to fully release network endpoints before reconnecting
+            sleep 1
+            docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+            # Reconnect only extra networks; primary network is auto-reconnected by docker start via HostConfig.NetworkMode
+            if [ -n "$extra_networks" ]; then
+                while IFS= read -r net; do
+                    if [ -n "$net" ] && [ "$net" != "$network_mode" ]; then
+                        docker network connect "$net" "$container_name" > /dev/null 2>&1 || true
+                    fi
                 done <<< "$extra_networks"
             fi
             docker start "$container_name" > /dev/null 2>&1 || true
@@ -531,11 +613,22 @@ recreate_container() {
 
         # Instant Rollback: restore backup container
         log_warn "🔄 Rolling back '$container_name' to previous container state..."
-        docker rm -f "$container_name" > /dev/null 2>&1 || true
-        docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+        # Cleanly disconnect new container from networks before removal (prevents Libnetwork panic)
         if [ -n "$extra_networks" ]; then
             while IFS= read -r net; do
-                [ -n "$net" ] && docker network connect "$net" "$container_name" > /dev/null 2>&1 || true
+                [ -n "$net" ] && docker network disconnect "$net" "$container_name" > /dev/null 2>&1 || true
+            done <<< "$extra_networks"
+        fi
+        docker rm -f "$container_name" > /dev/null 2>&1 || true
+        # Allow Docker to fully release network endpoints before reconnecting
+        sleep 1
+        docker rename "$backup_name" "$container_name" > /dev/null 2>&1 || true
+        # Reconnect only extra networks; primary network is auto-reconnected by docker start via HostConfig.NetworkMode
+        if [ -n "$extra_networks" ]; then
+            while IFS= read -r net; do
+                if [ -n "$net" ] && [ "$net" != "$network_mode" ]; then
+                    docker network connect "$net" "$container_name" > /dev/null 2>&1 || true
+                fi
             done <<< "$extra_networks"
         fi
         docker start "$container_name" > /dev/null 2>&1 || true
@@ -588,7 +681,15 @@ update_systower_self() {
     local latest_id
     latest_id=$(get_latest_image_id "$pull_image")
 
-    if [ "$running_id" = "$latest_id" ] && ! echo "$pull_output" | grep -qi "Downloaded newer image"; then
+    # Verify pull actually reached the registry
+    local pull_status_line
+    pull_status_line=$(echo "$pull_output" | grep -i "^Status:" | tail -1 || echo "")
+    if [ -z "$pull_status_line" ]; then
+        log_warn "  ⚠ Pull output did not contain a Status line — registry may be unreachable."
+        return 1
+    fi
+
+    if [ "$running_id" = "$latest_id" ]; then
         log_info "  ✓ Systower is up to date."
         return 0
     fi
@@ -681,7 +782,7 @@ update_systower_self() {
         --rm \
         -v /var/run/docker.sock:/var/run/docker.sock \
         "$pull_image" \
-        sh -c "
+        bash -c "
             sleep 2
             echo '[Systower Self-Update] Stopping old container $self_name...'
             docker stop -t 15 '$self_name' > /dev/null 2>&1 || docker kill '$self_name' > /dev/null 2>&1 || true
@@ -791,12 +892,22 @@ run_docker_updates() {
             fi
         fi
 
+        # Verify pull actually reached the registry (detect no-op pulls caused by network/DNS issues)
+        local pull_status_line
+        pull_status_line=$(echo "$pull_output" | grep -i "^Status:" | tail -1 || echo "")
+        if [ -z "$pull_status_line" ]; then
+            log_warn "  ⚠ Pull output for '$pull_image' did not contain a Status line — registry may be unreachable. Skipping '$container_name'."
+            log_debug "  Pull output was: $pull_output"
+            failed=$((failed + 1))
+            continue
+        fi
+
         # Compare image IDs
         local latest_id
         latest_id=$(get_latest_image_id "$pull_image")
 
-        # Check if up to date: image IDs match AND docker pull did not report downloading a newer image
-        if [ "$running_id" = "$latest_id" ] && ! echo "$pull_output" | grep -qi "Downloaded newer image"; then
+        # Check if up to date: image IDs match means no update available
+        if [ "$running_id" = "$latest_id" ]; then
             log_info "  ✓ '$container_name' is up to date."
             up_to_date=$((up_to_date + 1))
             continue

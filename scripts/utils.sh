@@ -489,7 +489,7 @@ validate_config() {
         log_warn "Both Docker and System updates are disabled. Systower has nothing to do!"
     fi
 
-    return "$errors"
+    [ "$errors" -eq 0 ]
 }
 
 # Mark as loaded to prevent double-sourcing
