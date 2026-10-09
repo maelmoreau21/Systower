@@ -36,6 +36,12 @@ services:
       # Docker Container Updates
       SYSTOWER_DOCKER_ENABLED: "true"
       SYSTOWER_DOCKER_CLEANUP: "true"
+      # Prune unused Docker images: "false" (disabled), "true" (dangling only), or "all" (all unused images)
+      SYSTOWER_DOCKER_PRUNE: "false"
+      # Set to "true" to remove all unused images not referenced by any container (docker image prune -a)
+      # SYSTOWER_DOCKER_PRUNE_ALL: "false"
+      # Optional: only prune images older than duration (e.g. "24h", "7d")
+      # SYSTOWER_DOCKER_PRUNE_UNTIL: ""
       SYSTOWER_DOCKER_STOP_TIMEOUT: "30"
       SYSTOWER_DOCKER_MONITOR_ONLY: "false"
       # Healthcheck timeout in seconds (default 60s gives apps like Technitium DNS / databases time to initialize)

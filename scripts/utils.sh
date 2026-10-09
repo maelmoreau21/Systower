@@ -325,6 +325,9 @@ load_defaults() {
     export SYSTOWER_DOCKER_EXCLUDE="${SYSTOWER_DOCKER_EXCLUDE:-}"
     export SYSTOWER_DOCKER_INCLUDE_ONLY="${SYSTOWER_DOCKER_INCLUDE_ONLY:-}"
     export SYSTOWER_DOCKER_CLEANUP="${SYSTOWER_DOCKER_CLEANUP:-true}"
+    export SYSTOWER_DOCKER_PRUNE="${SYSTOWER_DOCKER_PRUNE:-false}"
+    export SYSTOWER_DOCKER_PRUNE_ALL="${SYSTOWER_DOCKER_PRUNE_ALL:-false}"
+    export SYSTOWER_DOCKER_PRUNE_UNTIL="${SYSTOWER_DOCKER_PRUNE_UNTIL:-}"
     export SYSTOWER_DOCKER_STOP_TIMEOUT="${SYSTOWER_DOCKER_STOP_TIMEOUT:-30}"
     export SYSTOWER_DOCKER_MONITOR_ONLY="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
     export SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT:-60}"
@@ -361,6 +364,11 @@ print_config() {
         log_info "  Docker exclude:        ${SYSTOWER_DOCKER_EXCLUDE:-<none>}"
         log_info "  Docker include only:   ${SYSTOWER_DOCKER_INCLUDE_ONLY:-<all>}"
         log_info "  Docker cleanup:        ${SYSTOWER_DOCKER_CLEANUP}"
+        log_info "  Docker prune:          ${SYSTOWER_DOCKER_PRUNE}"
+        if is_true "$SYSTOWER_DOCKER_PRUNE" || [ "${SYSTOWER_DOCKER_PRUNE,,}" = "all" ] || [ "${SYSTOWER_DOCKER_PRUNE,,}" = "dangling" ] || [ "${SYSTOWER_DOCKER_PRUNE,,}" = "unused" ] || is_true "${SYSTOWER_DOCKER_PRUNE_ALL:-false}"; then
+            log_info "  Docker prune all:      ${SYSTOWER_DOCKER_PRUNE_ALL}"
+            [ -n "$SYSTOWER_DOCKER_PRUNE_UNTIL" ] && log_info "  Docker prune until:    ${SYSTOWER_DOCKER_PRUNE_UNTIL}"
+        fi
         log_info "  Docker stop timeout:   ${SYSTOWER_DOCKER_STOP_TIMEOUT}s"
         log_info "  Docker monitor only:   ${SYSTOWER_DOCKER_MONITOR_ONLY}"
         log_info "  Docker healthcheck:    ${SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT}s"
@@ -386,6 +394,8 @@ validate_config() {
     local system_enabled="${SYSTOWER_SYSTEM_ENABLED:-false}"
     local run_on_start="${SYSTOWER_RUN_ON_START:-true}"
     local cleanup="${SYSTOWER_DOCKER_CLEANUP:-true}"
+    local prune="${SYSTOWER_DOCKER_PRUNE:-false}"
+    local prune_all="${SYSTOWER_DOCKER_PRUNE_ALL:-false}"
     local monitor_only="${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"
     local system_reboot="${SYSTOWER_SYSTEM_REBOOT:-false}"
     local notify_enabled="${SYSTOWER_NOTIFY_ENABLED:-false}"
@@ -421,6 +431,17 @@ validate_config() {
 
     if ! is_boolean "$cleanup"; then
         log_error "SYSTOWER_DOCKER_CLEANUP must be true or false (got: $cleanup)"
+        errors=$((errors + 1))
+    fi
+
+    local prune_lower="${prune,,}"
+    if ! is_boolean "$prune_lower" && [[ "$prune_lower" != "dangling" && "$prune_lower" != "all" && "$prune_lower" != "unused" ]]; then
+        log_error "SYSTOWER_DOCKER_PRUNE must be true, false, dangling, or all (got: $prune)"
+        errors=$((errors + 1))
+    fi
+
+    if ! is_boolean "$prune_all"; then
+        log_error "SYSTOWER_DOCKER_PRUNE_ALL must be true or false (got: $prune_all)"
         errors=$((errors + 1))
     fi
 

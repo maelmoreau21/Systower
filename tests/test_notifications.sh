@@ -77,6 +77,9 @@ test_status_color_rollback() {
 # ============================================================================
 
 test_build_notification_json() {
+    if ! command -v jq >/dev/null 2>&1; then
+        return 0
+    fi
     local json
     json=$(build_notification "test_event" "Test Title" "Test Message" "success")
     
@@ -90,6 +93,9 @@ test_build_notification_json() {
 }
 
 test_build_notification_fields() {
+    if ! command -v jq >/dev/null 2>&1; then
+        return 0
+    fi
     local json
     json=$(build_notification "container_update" "Updated nginx" "New image pulled" "success")
     

@@ -56,6 +56,8 @@ services:
       # Mises à jour des conteneurs Docker
       SYSTOWER_DOCKER_ENABLED: "true"
       SYSTOWER_DOCKER_CLEANUP: "true"
+      # Supprimer les images non utilisées : false (désactivé), true (dangling), ou all (toutes)
+      SYSTOWER_DOCKER_PRUNE: "false"
 
       # Exclusion de conteneurs (Optionnel)
       # SYSTOWER_DOCKER_EXCLUDE: "postgres,redis,mon-conteneur"
@@ -139,7 +141,10 @@ Systower intègre des protections natives pour éliminer ce problème :
 | `SYSTOWER_DRY_RUN` | `false` | Mode simulation (aucune modification appliquée) |
 | `TZ` | `UTC` | Fuseau horaire (ex: `Europe/Paris`) |
 | `SYSTOWER_DOCKER_ENABLED` | `true` | Activer les mises à jour des conteneurs |
-| `SYSTOWER_DOCKER_CLEANUP` | `true` | Supprimer les anciennes images après mise à jour |
+| `SYSTOWER_DOCKER_CLEANUP` | `true` | Supprimer l'ancienne image après mise à jour réussie d'un conteneur |
+| `SYSTOWER_DOCKER_PRUNE` | `false` | Nettoyer les images non utilisées : `false` (désactivé), `true` (dangling/sans tag), ou `all` (toutes) |
+| `SYSTOWER_DOCKER_PRUNE_ALL` | `false` | Si `true`, supprime toutes les images non utilisées (`docker image prune -a`) |
+| `SYSTOWER_DOCKER_PRUNE_UNTIL` | `""` | Filtre optionnel pour supprimer uniquement les images plus anciennes que (ex: `24h`, `7d`) |
 | `SYSTOWER_DOCKER_EXCLUDE` | `""` | Liste des conteneurs à exclure séparés par des virgules |
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | Si défini, seuls ces conteneurs seront mis à jour |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Délai d'arrêt avant forçage (secondes) |

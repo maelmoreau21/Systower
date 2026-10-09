@@ -137,3 +137,20 @@ test_update_self_boolean() {
     load_defaults
     is_boolean "$SYSTOWER_UPDATE_SELF"
 }
+
+test_prune_default_false() {
+    unset SYSTOWER_DOCKER_PRUNE 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_DOCKER_PRUNE" = "false" ]
+}
+
+test_prune_all_default_false() {
+    unset SYSTOWER_DOCKER_PRUNE_ALL 2>/dev/null || true
+    load_defaults
+    [ "$SYSTOWER_DOCKER_PRUNE_ALL" = "false" ]
+}
+
+test_prune_all_boolean() {
+    export SYSTOWER_DOCKER_PRUNE_ALL="true"
+    is_boolean "$SYSTOWER_DOCKER_PRUNE_ALL"
+}

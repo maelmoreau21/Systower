@@ -800,6 +800,88 @@ update_systower_self() {
 }
 
 # ----------------------------------------------------------------------------
+# Docker image prune
+# ----------------------------------------------------------------------------
+
+# Prune unused Docker images based on configuration
+# Supports dangling-only pruning, or all unused images (--all)
+# Respects dry-run, monitor-only, and optional age filters (SYSTOWER_DOCKER_PRUNE_UNTIL)
+prune_unused_images() {
+    local prune="${SYSTOWER_DOCKER_PRUNE:-false}"
+    local prune_all="${SYSTOWER_DOCKER_PRUNE_ALL:-false}"
+    local prune_unused="${SYSTOWER_DOCKER_PRUNE_UNUSED:-false}"
+    local prune_until="${SYSTOWER_DOCKER_PRUNE_UNTIL:-}"
+
+    local prune_lower="${prune,,}"
+
+    # Check if prune is enabled
+    if ! is_true "$prune_lower" && [ "$prune_lower" != "all" ] && [ "$prune_lower" != "dangling" ] && [ "$prune_lower" != "unused" ] \
+       && ! is_true "$prune_all" && ! is_true "$prune_unused"; then
+        return 0
+    fi
+
+    log_section "🧹 Docker Image Prune"
+
+    # Determine if -a (all unused) or dangling only
+    local all_flag=false
+    if [ "$prune_lower" = "all" ] || [ "$prune_lower" = "unused" ] || is_true "$prune_all" || is_true "$prune_unused"; then
+        all_flag=true
+    fi
+
+    local prune_desc="dangling images"
+    if [ "$all_flag" = true ]; then
+        prune_desc="all unused images"
+    fi
+
+    if [ -n "$prune_until" ]; then
+        prune_desc+=" (older than $prune_until)"
+    fi
+
+    # Dry-run / Monitor mode checks
+    if is_true "${SYSTOWER_DOCKER_MONITOR_ONLY:-false}"; then
+        log_info "  👁 Monitor mode: would prune $prune_desc."
+        return 0
+    fi
+
+    if is_true "${SYSTOWER_DRY_RUN:-false}"; then
+        log_info "  🔍 Dry run: would prune $prune_desc."
+        return 0
+    fi
+
+    log_info "Pruning Docker images ($prune_desc)..."
+
+    local -a prune_args=("-f")
+    if [ "$all_flag" = true ]; then
+        prune_args+=("-a")
+    fi
+
+    if [ -n "$prune_until" ]; then
+        prune_args+=("--filter" "until=${prune_until}")
+    fi
+
+    local prune_output=""
+    if ! prune_output=$(docker image prune "${prune_args[@]}" 2>&1); then
+        log_warn "Docker image prune encountered an issue:"
+        log_warn "  $prune_output"
+        return 0
+    fi
+
+    # Log detailed output in debug mode
+    log_debug "$prune_output"
+
+    local reclaimed
+    reclaimed=$(echo "$prune_output" | grep -i "Total reclaimed space:" | tail -n 1 | sed 's/^[[:space:]]*//' || echo "")
+
+    if [ -n "$reclaimed" ]; then
+        log_info "  ✓ $reclaimed"
+    else
+        log_info "  ✓ Pruning completed."
+    fi
+
+    return 0
+}
+
+# ----------------------------------------------------------------------------
 # Main update loop
 # ----------------------------------------------------------------------------
 
@@ -819,6 +901,7 @@ run_docker_updates() {
 
     if [ -z "$container_ids" ]; then
         log_info "No running containers found."
+        prune_unused_images || true
         return 0
     fi
 
@@ -953,6 +1036,9 @@ run_docker_updates() {
         fi
 
     done <<< "$container_ids"
+
+    # Prune unused images if enabled
+    prune_unused_images || true
 
     # Summary
     log_info ""

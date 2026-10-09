@@ -56,6 +56,8 @@ services:
       # Docker Container Updates
       SYSTOWER_DOCKER_ENABLED: "true"
       SYSTOWER_DOCKER_CLEANUP: "true"
+      # Prune unused images: false (disabled), true (dangling only), or all (all unused images)
+      SYSTOWER_DOCKER_PRUNE: "false"
 
       # Optional container exclusions
       # SYSTOWER_DOCKER_EXCLUDE: "postgres,redis,my-container"
@@ -139,7 +141,10 @@ Systower includes built-in safeguards:
 | `SYSTOWER_DRY_RUN` | `false` | Dry run simulation mode (no changes made) |
 | `TZ` | `UTC` | Timezone (e.g. `Europe/Paris`, `America/New_York`) |
 | `SYSTOWER_DOCKER_ENABLED` | `true` | Enable Docker container updates |
-| `SYSTOWER_DOCKER_CLEANUP` | `true` | Delete previous image after successful update |
+| `SYSTOWER_DOCKER_CLEANUP` | `true` | Delete previous image after successful container update |
+| `SYSTOWER_DOCKER_PRUNE` | `false` | Prune unused images: `false` (disabled), `true` (dangling only), or `all` (all unused images) |
+| `SYSTOWER_DOCKER_PRUNE_ALL` | `false` | If `true`, removes all unused images (`docker image prune -a`) |
+| `SYSTOWER_DOCKER_PRUNE_UNTIL` | `""` | Optional filter to only prune images older than a duration (e.g. `24h`, `7d`) |
 | `SYSTOWER_DOCKER_EXCLUDE` | `""` | Comma-separated container names to exclude |
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | If set, only these containers will be updated |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
