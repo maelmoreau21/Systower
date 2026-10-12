@@ -79,7 +79,7 @@ impl Config {
             update_self: boolean("SYSTOWER_UPDATE_SELF", false)?,
             system_enabled: boolean("SYSTOWER_SYSTEM_ENABLED", false)?,
             system_full_upgrade: boolean("SYSTOWER_SYSTEM_FULL_UPGRADE", false)?,
-            rpi_network_immunity: boolean("SYSTOWER_RPI_NETWORK_IMMUNITY", true)?,
+            rpi_network_immunity: boolean("SYSTOWER_RPI_NETWORK_IMMUNITY", false)?,
             system_reboot: boolean("SYSTOWER_SYSTEM_REBOOT", false)?,
             dry_run: boolean("SYSTOWER_DRY_RUN", false)?,
             log_level: value("SYSTOWER_LOG_LEVEL", "info"),

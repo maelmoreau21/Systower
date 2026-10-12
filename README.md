@@ -137,7 +137,7 @@ Systower includes built-in safeguards:
 
 ### V2 CLI preview
 
-The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are skipped because inspected Docker configuration is not equivalent to `docker compose up -d`.
+The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are recreated directly through Docker while preserving their inspected configuration and Compose labels.
 
 | Environment Variable | Default | Description |
 |:---|:---|:---|
@@ -159,7 +159,7 @@ The Rust implementation currently supports `systower check`, `systower docker ch
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protect and skip VPN, DNS, and host-mode network containers |
 | `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protect containers mounting `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Cooldown pause (seconds) between container updates |
-| `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Automatically immunize Raspberry Pi host networking |
+| `SYSTOWER_RPI_NETWORK_IMMUNITY` | `false` | On Raspberry Pi only, immunize host networking |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |
 | `SYSTOWER_SYSTEM_FULL_UPGRADE` | `false` | Use Debian/Ubuntu `apt-get full-upgrade -y` instead of the conservative `upgrade -y` |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot host system if kernel/packages require it |

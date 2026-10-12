@@ -95,7 +95,16 @@ pub fn plan(contents: &str) -> Result<SystemUpdatePlan, HostError> {
 fn host_command(command: &[&str]) -> Command {
     if Path::new("/proc/1/root").exists() {
         let mut process = Command::new("nsenter");
-        process.args(["-t", "1", "-m", "-u", "-n", "-i", "--"]);
+        process.args([
+            "-t",
+            "1",
+            "--root=/proc/1/root",
+            "-m",
+            "-u",
+            "-n",
+            "-i",
+            "--",
+        ]);
         process.args(command);
         process
     } else {
@@ -103,6 +112,13 @@ fn host_command(command: &[&str]) -> Command {
         process.args(&command[1..]);
         process
     }
+}
+
+fn is_raspberry_pi() -> bool {
+    ["/proc/device-tree/model", "/proc/cpuinfo"]
+        .iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .any(|contents| contents.to_ascii_lowercase().contains("raspberry pi"))
 }
 
 pub fn apply(plan: &SystemUpdatePlan, explicit_apply: bool) -> Result<(), HostError> {
@@ -159,6 +175,9 @@ pub fn reboot(explicit_apply: bool) -> Result<(), HostError> {
 pub fn apply_network_immunity(explicit_apply: bool) -> Result<(), HostError> {
     if !explicit_apply {
         return Err(HostError::ApplyNotExplicit);
+    }
+    if !is_raspberry_pi() {
+        return Ok(());
     }
     let root = Path::new("/proc/1/root");
     let root = if root.exists() { root } else { Path::new("/") };

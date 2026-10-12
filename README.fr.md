@@ -159,7 +159,7 @@ La version Rust prend actuellement en charge `systower check`, `systower docker 
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protéger et ignorer les conteneurs VPN, DNS et host mode |
 | `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protéger les conteneurs montant `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Délai de pause (secondes) entre chaque mise à jour |
-| `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Immuniser automatiquement le réseau hôte Raspberry Pi |
+| `SYSTOWER_RPI_NETWORK_IMMUNITY` | `false` | Sur Raspberry Pi uniquement, immuniser le réseau hôte |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Activer la mise à jour des paquets de la machine hôte |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Redémarrage automatique si requis par les paquets |
 | `SYSTOWER_NOTIFY_ENABLED` | `false` | Activer le système de notifications |

@@ -20,11 +20,7 @@ pub struct ContainerFacts {
 
 impl ContainerPolicy {
     pub fn allows(&self, facts: &ContainerFacts) -> bool {
-        if facts.is_self
-            || facts.excluded_by_label
-            || facts.compose_managed
-            || facts.name.ends_with("_systower_bak")
-        {
+        if facts.is_self || facts.excluded_by_label || facts.name.ends_with("_systower_bak") {
             return false;
         }
         if self.protect_socket && facts.mounts_docker_socket && self.include_only.is_empty() {
@@ -86,9 +82,9 @@ mod tests {
     }
 
     #[test]
-    fn compose_managed_containers_are_skipped() {
+    fn compose_managed_containers_are_allowed_when_otherwise_safe() {
         let policy = ContainerPolicy::default();
-        assert!(!policy.allows(&ContainerFacts {
+        assert!(policy.allows(&ContainerFacts {
             compose_managed: true,
             ..facts("api")
         }));

@@ -71,7 +71,7 @@ services:
       # Requires pid: "host" and privileged: true above
       SYSTOWER_SYSTEM_ENABLED: "false"
       SYSTOWER_SYSTEM_FULL_UPGRADE: "false"
-      SYSTOWER_RPI_NETWORK_IMMUNITY: "true"
+      SYSTOWER_RPI_NETWORK_IMMUNITY: "false"
       SYSTOWER_SYSTEM_REBOOT: "false"
 
       # Multi-Channel Notifications (Discord, Slack, Telegram, Webhook)

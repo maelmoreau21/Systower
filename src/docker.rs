@@ -301,6 +301,10 @@ impl DockerEngine {
                 transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
                 return Err(DockerError::RollbackFailed(error.to_string()));
             }
+            if let Err(error) = self.verify_restored_container(&original_name).await {
+                transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
+                return Err(DockerError::RollbackFailed(error));
+            }
             transition(&mut transaction, TransactionState::RolledBack, journal)?;
         }
         Ok(())
@@ -682,22 +686,49 @@ impl DockerEngine {
                 "{reason}; restore start failed: {error}"
             )));
         }
-        let restored = self.client.inspect_container(name, None).await?;
-        let restored_value = serde_json::to_value(restored)?;
-        if restored_value
-            .pointer("/State/Running")
-            .and_then(|running| running.as_bool())
-            != Some(true)
-        {
+        if let Err(error) = self.verify_restored_container(name).await {
             transition(transaction, TransactionState::RollbackFailed, journal)?;
-            return Err(DockerError::RollbackFailed(format!(
-                "{reason}; restored container is not running"
-            )));
+            return Err(DockerError::RollbackFailed(format!("{reason}; {error}")));
         }
         transition(transaction, TransactionState::RolledBack, journal)?;
         Err(DockerError::UpdateFailed(format!(
             "{reason}; rollback verified"
         )))
+    }
+
+    async fn verify_restored_container(&self, name: &str) -> Result<(), String> {
+        let restored = self
+            .client
+            .inspect_container(name, None)
+            .await
+            .map_err(|error| format!("restored container inspection failed: {error}"))?;
+        let restored_value = serde_json::to_value(restored)
+            .map_err(|error| format!("restored container inspection was invalid: {error}"))?;
+        if restored_value
+            .pointer("/State/Running")
+            .and_then(|running| running.as_bool())
+            != Some(true)
+        {
+            return Err("restored container is not running".into());
+        }
+        let health = restored_value.pointer("/State/Health/Status");
+        if health.is_some() && health.and_then(|status| status.as_str()) != Some("healthy") {
+            return Err(format!(
+                "restored container health is '{}', not healthy",
+                health
+                    .and_then(|status| status.as_str())
+                    .unwrap_or("unknown")
+            ));
+        }
+        if restored_value
+            .pointer("/RestartCount")
+            .and_then(|count| count.as_u64())
+            .unwrap_or(0)
+            != 0
+        {
+            return Err("restored container is restarting".into());
+        }
+        Ok(())
     }
 }
 

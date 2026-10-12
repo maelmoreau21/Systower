@@ -20,9 +20,11 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         info!("Docker updates disabled by configuration");
         None
     };
-    if let Some(engine) = engine.as_ref() {
-        if let Err(error) = engine.recover_interrupted(&journal).await {
-            warn!(%error, "interrupted Docker transaction recovery failed");
+    if !config.dry_run && !config.docker_monitor_only {
+        if let Some(engine) = engine.as_ref() {
+            if let Err(error) = engine.recover_interrupted(&journal).await {
+                warn!(%error, "interrupted Docker transaction recovery failed");
+            }
         }
     }
     let notifier = if config.notify_enabled {
@@ -117,6 +119,7 @@ async fn run_cycle(
     }
 
     if !config.dry_run
+        && !config.docker_monitor_only
         && (config.docker_prune.eq_ignore_ascii_case("true")
             || config.docker_prune.eq_ignore_ascii_case("all")
             || config.docker_prune_all)
@@ -136,7 +139,7 @@ async fn run_cycle(
 
 async fn run_system_update(config: &Config) {
     if config.system_enabled {
-        if config.dry_run {
+        if config.dry_run || config.docker_monitor_only {
             info!("host package update planned (dry run)");
             return;
         }
