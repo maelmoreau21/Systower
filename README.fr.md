@@ -9,11 +9,11 @@
 [🇬🇧 English](README.md) • [🇫🇷 Français](README.fr.md)
 
 [![Build & Push](https://github.com/maelmoreau21/Systower/actions/workflows/build.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/build.yml)
-[![Tests](https://github.com/maelmoreau21/Systower/actions/workflows/test.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/test.yml)
+[![Tests](https://github.com/maelmoreau21/Systower/actions/workflows/rust.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Image Size](https://img.shields.io/badge/taille%20image-~25%20Mo-brightgreen)](https://github.com/maelmoreau21/Systower)
 [![RAM](https://img.shields.io/badge/RAM-%3C%202%20Mo-brightgreen)](https://github.com/maelmoreau21/Systower)
-[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7%20%7C%20armv6-purple)](https://github.com/maelmoreau21/Systower)
+[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-purple)](https://github.com/maelmoreau21/Systower)
 
 </div>
 
@@ -29,7 +29,7 @@
 - 🔔 **Notifications Multi-Canaux** — Alertes immédiates sur **Discord**, **Slack**, **Telegram** et **Webhooks JSON**.
 - 🔄 **Rollback Automatique** — En cas de problème au démarrage d'une nouvelle image, Systower restaure instantanément l'ancienne version.
 - 🧹 **Nettoyage Automatique** — Suppression des anciennes images inutilisées après une mise à jour réussie.
-- 🪶 **Ultra-Léger & Économe** — Image de **~25 Mo**, consommation de **< 2 Mo de RAM**, compatible avec toutes les architectures (`amd64`, `arm64`, `arm/v7`, `arm/v6`).
+- 🪶 **Ultra-Léger & Économe** — Image de **~25 Mo**, consommation de **< 2 Mo de RAM**, compatible avec `amd64` et `arm64`.
 
 ---
 
@@ -137,7 +137,7 @@ Systower intègre des protections natives pour éliminer ce problème :
 
 ### Aperçu de la CLI V2
 
-La version Rust prend actuellement en charge `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NOM --image IMAGE` et `systower run`. Utilisez `--no-pull` uniquement pour une image déjà présente localement. Les conteneurs Compose sont recréés depuis leur configuration Docker inspectée.
+La version Rust prend actuellement en charge `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NOM --image IMAGE` et `systower run`. Utilisez `--no-pull` uniquement pour une image déjà présente localement. Les conteneurs Compose sont ignorés, car la configuration Docker inspectée n’est pas équivalente à `docker compose up -d`.
 
 | Variable | Défaut | Description |
 |:---|:---|:---|
@@ -155,7 +155,7 @@ La version Rust prend actuellement en charge `systower check`, `systower docker 
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | Si défini, seuls ces conteneurs seront mis à jour |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Délai d'arrêt avant forçage (secondes) |
 | `SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT` | `60` | Délai d'attente du healthcheck après recréation (secondes) |
-| `SYSTOWER_UPDATE_SELF` | `true` | Mettre à jour automatiquement le conteneur Systower lui-même |
+| `SYSTOWER_UPDATE_SELF` | `false` | Détecter Systower lui-même, mais ignorer son remplacement jusqu’à la mise en place d’un transfert supervisé sûr |
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protéger et ignorer les conteneurs VPN, DNS et host mode |
 | `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protéger les conteneurs montant `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Délai de pause (secondes) entre chaque mise à jour |

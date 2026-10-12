@@ -9,11 +9,11 @@
 [🇬🇧 English](README.md) • [🇫🇷 Français](README.fr.md)
 
 [![Build & Push](https://github.com/maelmoreau21/Systower/actions/workflows/build.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/build.yml)
-[![Tests & Lint](https://github.com/maelmoreau21/Systower/actions/workflows/test.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/test.yml)
+[![Tests & Lint](https://github.com/maelmoreau21/Systower/actions/workflows/rust.yml/badge.svg)](https://github.com/maelmoreau21/Systower/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker Image Size](https://img.shields.io/badge/image%20size-~25MB-brightgreen)](https://github.com/maelmoreau21/Systower)
 [![RAM Usage](https://img.shields.io/badge/RAM-%3C%202MB-brightgreen)](https://github.com/maelmoreau21/Systower)
-[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7%20%7C%20armv6-purple)](https://github.com/maelmoreau21/Systower)
+[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-purple)](https://github.com/maelmoreau21/Systower)
 
 </div>
 
@@ -29,7 +29,7 @@
 - 🔔 **Multi-Channel Notifications** — Instant alerts to **Discord**, **Slack**, **Telegram**, and **custom JSON webhooks** on updates, errors, or rollbacks.
 - 🔄 **Automatic Rollback** — If a newly updated container fails to start, Systower automatically reverts to the backup container instantaneously.
 - 🧹 **Auto Cleanup** — Remove orphaned and dangling images after successful updates.
-- 🪶 **Ultra-Lightweight Multi-Arch** — Alpine Linux base (~25MB image, < 2MB RAM), supporting `amd64`, `arm64`, `arm/v7`, and `arm/v6` (all Raspberry Pi models).
+- 🪶 **Ultra-Lightweight Multi-Arch** — Alpine Linux base (~25MB image, < 2MB RAM), supporting `amd64` and `arm64`.
 
 ---
 
@@ -137,7 +137,7 @@ Systower includes built-in safeguards:
 
 ### V2 CLI preview
 
-The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are recreated from their inspected Docker configuration.
+The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are skipped because inspected Docker configuration is not equivalent to `docker compose up -d`.
 
 | Environment Variable | Default | Description |
 |:---|:---|:---|
@@ -155,7 +155,7 @@ The Rust implementation currently supports `systower check`, `systower docker ch
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | If set, only these containers will be updated |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
 | `SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT` | `60` | Post-recreation healthcheck timeout in seconds |
-| `SYSTOWER_UPDATE_SELF` | `false` | Detect Systower itself, but skip replacement because a running daemon cannot safely remove its own container |
+| `SYSTOWER_UPDATE_SELF` | `false` | Detect Systower itself, but skip replacement until a supervised handoff can stop the running daemon safely |
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protect and skip VPN, DNS, and host-mode network containers |
 | `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protect containers mounting `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Cooldown pause (seconds) between container updates |

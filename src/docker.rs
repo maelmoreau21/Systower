@@ -191,6 +191,8 @@ impl ContainerSnapshot {
                 .labels
                 .get("systower.exclude")
                 .is_some_and(|value| value.eq_ignore_ascii_case("true")),
+            compose_managed: self.labels.contains_key("com.docker.compose.project")
+                || self.labels.contains_key("com.docker.compose.service"),
             network_sensitive: image_and_name.contains("wireguard")
                 || image_and_name.contains("tailscale")
                 || image_and_name.contains("gluetun")

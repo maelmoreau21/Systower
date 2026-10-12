@@ -15,9 +15,9 @@ This document records the migration from the former Bash implementation to Systo
 - Socket and network-sensitive containers are protected by default.
 - Digest identity is checked before an update is planned.
 - Containers without a Docker healthcheck are not accepted by default. Enable `SYSTOWER_DOCKER_ALLOW_NO_HEALTHCHECK=true` only when running-state plus stability is an acceptable policy.
-- Compose-managed containers are not recreated when the original Compose project source is unavailable.
+- Compose-managed containers are skipped because the original Compose project source is not available to the Docker API updater; inspected configuration is not equivalent to `docker compose up -d`.
 - Host package updates remain optional and are not enabled by default.
-- `SYSTOWER_UPDATE_SELF` stays disabled until the supervised self-update path is complete.
+- `SYSTOWER_UPDATE_SELF` is disabled by default and currently remains a protected detection-only switch until a supervised handoff can stop the running daemon safely.
 
 ## State and rollback
 

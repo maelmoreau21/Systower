@@ -15,8 +15,9 @@ Ce document décrit la migration historique de l’ancienne implémentation Bash
 - Les conteneurs réseau et ceux qui montent le socket Docker sont protégés par défaut.
 - Les mises à jour sont comparées par identité d’image.
 - Un conteneur sans healthcheck est refusé par défaut. `SYSTOWER_DOCKER_ALLOW_NO_HEALTHCHECK=true` doit être explicite.
-- Un conteneur Compose n’est pas recréé si le fichier source du projet est inaccessible.
+- Les conteneurs Compose sont ignorés, car l’API Docker ne fournit pas les fichiers source du projet et une configuration inspectée n’est pas équivalente à `docker compose up -d`.
 - Les mises à jour Linux restent facultatives et désactivées par défaut.
+- `SYSTOWER_UPDATE_SELF` est désactivé par défaut et reste actuellement limité à la détection protégée, jusqu’à la mise en place d’un transfert supervisé permettant d’arrêter le daemon en toute sécurité.
 
 ## État et rollback
 
