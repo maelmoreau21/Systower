@@ -5,7 +5,8 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src benches \
     && printf 'pub fn build_placeholder() {}\n' > src/lib.rs \
-    && printf 'fn main() {}\n' > src/main.rs
+    && printf 'fn main() {}\n' > src/main.rs \
+    && printf 'fn main() {}\n' > benches/core.rs
 RUN cargo build --release
 COPY src ./src
 COPY benches ./benches
