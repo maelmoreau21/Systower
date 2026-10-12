@@ -15,8 +15,20 @@ pub struct Cli {
 pub enum Command {
     Status,
     Check,
+    Docker(DockerArgs),
     Config(ConfigArgs),
     Version,
+}
+
+#[derive(Debug, Args)]
+pub struct DockerArgs {
+    #[command(subcommand)]
+    pub command: DockerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DockerCommand {
+    Check,
 }
 
 #[derive(Debug, Args)]

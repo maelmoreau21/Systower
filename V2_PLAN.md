@@ -15,7 +15,7 @@ systower (CLI + daemon)
   notify       bounded, redacted event delivery
 ```
 
-The first slice intentionally contains only configuration, policy, and CLI validation. Docker mutations will not be added until their typed snapshot and transaction contracts are tested.
+The current read-only slice contains configuration, policy, CLI validation, native Docker discovery, inspected safety facts, and image-identity planning. Docker mutations will not be added until the typed snapshot and transaction contracts are tested.
 
 ## V1 findings driving the design
 
@@ -28,7 +28,7 @@ The first slice intentionally contains only configuration, policy, and CLI valid
 ## Implementation order
 
 1. Typed configuration, CLI validation, and policy tests.
-2. Docker API adapter with complete inspect snapshots and a read-only `check` command.
+2. Docker API adapter with inspected safety facts and a read-only `docker check` command.
 3. Persistent transaction journal, process lock, and explicit update state machine.
 4. Image resolution, pull verification, container replacement, health policy, and verified rollback.
 5. Compose detection with safe exclusion when the original project files are unavailable.

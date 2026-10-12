@@ -1,11 +1,13 @@
 use clap::Parser;
-use systower::cli::ConfigCommand;
+use systower::cli::{ConfigCommand, DockerCommand};
 use systower::{
     cli::{Cli, Command},
     config::Config,
+    docker::DockerEngine,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let config = Config::from_env()?;
 
@@ -23,6 +25,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.validate()?;
             println!("configuration: valid");
         }
+        Command::Docker(args) => match args.command {
+            DockerCommand::Check => {
+                let engine = DockerEngine::connect().await?;
+                let containers = engine.list_allowed(&config.policy()).await?;
+                println!("docker: reachable");
+                println!("allowed containers: {}", containers.len());
+            }
+        },
         Command::Config(args) => match args.command {
             ConfigCommand::Validate => {
                 config.validate()?;

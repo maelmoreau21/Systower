@@ -49,6 +49,85 @@ pub enum StateError {
     InvalidRecord(#[from] serde_json::Error),
     #[error("another Systower instance owns lock {0}")]
     AlreadyLocked(PathBuf),
+    #[error("invalid transaction transition from {from:?} to {to:?}")]
+    InvalidTransition {
+        from: TransactionState,
+        to: TransactionState,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Transaction {
+    record: TransactionRecord,
+}
+
+impl Transaction {
+    pub fn new(transaction_id: String, container_id: String, image: String) -> Self {
+        Self {
+            record: TransactionRecord {
+                transaction_id,
+                container_id,
+                state: TransactionState::Planned,
+                image,
+            },
+        }
+    }
+
+    pub fn record(&self) -> &TransactionRecord {
+        &self.record
+    }
+
+    pub fn transition(&mut self, next: TransactionState) -> Result<(), StateError> {
+        if !valid_transition(&self.record.state, &next) {
+            return Err(StateError::InvalidTransition {
+                from: self.record.state.clone(),
+                to: next,
+            });
+        }
+        self.record.state = next;
+        Ok(())
+    }
+}
+
+fn valid_transition(from: &TransactionState, to: &TransactionState) -> bool {
+    matches!(
+        (from, to),
+        (TransactionState::Planned, TransactionState::ImagePulled)
+            | (
+                TransactionState::ImagePulled,
+                TransactionState::BackupCreated
+            )
+            | (
+                TransactionState::BackupCreated,
+                TransactionState::ReplacementStarted
+            )
+            | (
+                TransactionState::ReplacementStarted,
+                TransactionState::HealthChecking
+            )
+            | (
+                TransactionState::HealthChecking,
+                TransactionState::Committed
+            )
+            | (TransactionState::ImagePulled, TransactionState::RollingBack)
+            | (
+                TransactionState::BackupCreated,
+                TransactionState::RollingBack
+            )
+            | (
+                TransactionState::ReplacementStarted,
+                TransactionState::RollingBack
+            )
+            | (
+                TransactionState::HealthChecking,
+                TransactionState::RollingBack
+            )
+            | (TransactionState::RollingBack, TransactionState::RolledBack)
+            | (
+                TransactionState::RollingBack,
+                TransactionState::RollbackFailed
+            )
+    )
 }
 
 pub struct StateJournal {
@@ -192,5 +271,30 @@ mod tests {
         drop(lock);
         assert!(InstanceLock::acquire(&path).is_ok());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn transaction_rejects_commit_before_health_check() {
+        let mut transaction = Transaction::new("tx-2".into(), "abc".into(), "example:v2".into());
+        let error = transaction
+            .transition(TransactionState::Committed)
+            .unwrap_err();
+        assert!(matches!(error, StateError::InvalidTransition { .. }));
+    }
+
+    #[test]
+    fn transaction_allows_verified_rollback_path() {
+        let mut transaction = Transaction::new("tx-3".into(), "abc".into(), "example:v2".into());
+        for state in [
+            TransactionState::ImagePulled,
+            TransactionState::BackupCreated,
+            TransactionState::ReplacementStarted,
+            TransactionState::HealthChecking,
+            TransactionState::RollingBack,
+            TransactionState::RolledBack,
+        ] {
+            transaction.transition(state).unwrap();
+        }
+        assert_eq!(transaction.record().state, TransactionState::RolledBack);
     }
 }

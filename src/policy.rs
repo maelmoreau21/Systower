@@ -12,6 +12,8 @@ pub struct ContainerFacts {
     pub excluded_by_label: bool,
     pub network_sensitive: bool,
     pub mounts_docker_socket: bool,
+    pub network_mode: String,
+    pub capabilities: Vec<String>,
     pub is_self: bool,
 }
 
@@ -23,10 +25,12 @@ impl ContainerPolicy {
         if self.protect_socket && facts.mounts_docker_socket && self.include_only.is_empty() {
             return false;
         }
-        if self.protect_network
-            && facts.network_sensitive
-            && !contains(&self.include_only, &facts.name)
-        {
+        let protected_network = facts.network_sensitive
+            || facts.network_mode == "host"
+            || facts.network_mode.starts_with("container:")
+            || contains(&facts.capabilities, "NET_ADMIN")
+            || contains(&facts.capabilities, "NET_RAW");
+        if self.protect_network && protected_network && !contains(&self.include_only, &facts.name) {
             return false;
         }
         if !self.include_only.is_empty() {
