@@ -141,7 +141,7 @@ jobs:
           PRIMARY_TAG: ${{ steps.meta.outputs.tags }}
         run: |
           primary_tag="$(printf '%s\n' "$PRIMARY_TAG" | head -n 1)"
-          digest="$(docker buildx imagetools inspect "$primary_tag" --format '{{.ManifestDescriptor.Digest}}')"
+          digest="$(docker buildx imagetools inspect "$primary_tag" --format '{{.Manifest.Digest}}')"
           echo "value=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
