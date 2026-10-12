@@ -155,12 +155,13 @@ The Rust implementation currently supports `systower check`, `systower docker ch
 | `SYSTOWER_DOCKER_INCLUDE_ONLY` | `""` | If set, only these containers will be updated |
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
 | `SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT` | `60` | Post-recreation healthcheck timeout in seconds |
-| `SYSTOWER_UPDATE_SELF` | `true` | Automatically update the Systower container itself |
+| `SYSTOWER_UPDATE_SELF` | `false` | Detect Systower itself, but skip replacement because a running daemon cannot safely remove its own container |
 | `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protect and skip VPN, DNS, and host-mode network containers |
 | `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protect containers mounting `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Cooldown pause (seconds) between container updates |
 | `SYSTOWER_RPI_NETWORK_IMMUNITY` | `true` | Automatically immunize Raspberry Pi host networking |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |
+| `SYSTOWER_SYSTEM_FULL_UPGRADE` | `false` | Use Debian/Ubuntu `apt-get full-upgrade -y` instead of the conservative `upgrade -y` |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot host system if kernel/packages require it |
 | `SYSTOWER_NOTIFY_ENABLED` | `false` | Enable notifications dispatcher |
 | `SYSTOWER_STATE_FILE` | `./systower-state.jsonl` | Persistent V2 transaction journal |

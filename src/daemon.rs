@@ -14,7 +14,17 @@ use crate::{
 pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let _lock = InstanceLock::acquire(format!("{}.lock", config.state_file))?;
     let journal = StateJournal::open(&config.state_file)?;
-    let engine = DockerEngine::connect().await?;
+    let engine = if config.docker_enabled {
+        Some(DockerEngine::connect().await?)
+    } else {
+        info!("Docker updates disabled by configuration");
+        None
+    };
+    if let Some(engine) = engine.as_ref() {
+        if let Err(error) = engine.recover_interrupted(&journal).await {
+            warn!(%error, "interrupted Docker transaction recovery failed");
+        }
+    }
     let notifier = if config.notify_enabled {
         Some(Notifier::from_config(&config)?)
     } else {
@@ -22,23 +32,27 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if config.run_on_start {
-        run_cycle(&config, &engine, &journal, notifier.as_ref()).await;
+        run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await;
     }
 
     loop {
         let delay = delay_until_next(&config.cron)?;
         info!(seconds = delay.as_secs(), "next update cycle scheduled");
         tokio::time::sleep(delay.max(Duration::from_secs(1))).await;
-        run_cycle(&config, &engine, &journal, notifier.as_ref()).await;
+        run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await;
     }
 }
 
 async fn run_cycle(
     config: &Config,
-    engine: &DockerEngine,
+    engine: Option<&DockerEngine>,
     journal: &StateJournal,
     notifier: Option<&Notifier>,
 ) {
+    let Some(engine) = engine else {
+        return run_system_update(config).await;
+    };
+
     let containers = match engine
         .list_allowed_with_self(&config.policy(), config.update_self)
         .await
@@ -46,11 +60,15 @@ async fn run_cycle(
         Ok(containers) => containers,
         Err(error) => {
             error!(%error, "cannot enumerate Docker containers");
-            return;
+            return run_system_update(config).await;
         }
     };
 
     for container in containers {
+        if container.facts().is_self && config.update_self {
+            warn!(container = %container.name, "self-update skipped because replacing the running daemon would interrupt its transaction");
+            continue;
+        }
         if config.dry_run || config.docker_monitor_only {
             info!(container = %container.name, image = %container.image, "update candidate detected");
             continue;
@@ -98,9 +116,10 @@ async fn run_cycle(
         tokio::time::sleep(Duration::from_secs(config.docker_update_delay)).await;
     }
 
-    if config.docker_prune.eq_ignore_ascii_case("true")
-        || config.docker_prune.eq_ignore_ascii_case("all")
-        || config.docker_prune_all
+    if !config.dry_run
+        && (config.docker_prune.eq_ignore_ascii_case("true")
+            || config.docker_prune.eq_ignore_ascii_case("all")
+            || config.docker_prune_all)
     {
         let prune_all = config.docker_prune.eq_ignore_ascii_case("all") || config.docker_prune_all;
         match engine
@@ -112,6 +131,10 @@ async fn run_cycle(
         }
     }
 
+    run_system_update(config).await;
+}
+
+async fn run_system_update(config: &Config) {
     if config.system_enabled {
         if config.dry_run {
             info!("host package update planned (dry run)");
@@ -121,7 +144,26 @@ async fn run_cycle(
             .or_else(|_| std::fs::read_to_string("/etc/os-release"))
             .map_err(crate::host::HostError::from)
             .and_then(|contents| crate::host::plan(&contents))
+            .map(|mut plan| {
+                if config.system_full_upgrade
+                    && matches!(
+                        plan.distribution,
+                        crate::host::Distribution::Debian | crate::host::Distribution::Ubuntu
+                    )
+                {
+                    plan.full_upgrade = true;
+                    if let Some(command) = plan.command.get_mut(4) {
+                        *command = "full-upgrade".into();
+                    }
+                }
+                plan
+            })
             .and_then(|plan| crate::host::apply(&plan, true).map(|_| plan));
+        if config.rpi_network_immunity {
+            if let Err(error) = crate::host::apply_network_immunity(true) {
+                warn!(%error, "Raspberry Pi network immunity setup failed");
+            }
+        }
         match result {
             Ok(plan) if config.system_reboot && crate::host::reboot_required(&plan) => {
                 if let Err(error) = crate::host::reboot(true) {

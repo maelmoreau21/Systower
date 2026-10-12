@@ -1,3 +1,5 @@
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::{collections::HashMap, path::Path, process::Command};
 
 use thiserror::Error;
@@ -17,6 +19,7 @@ pub struct SystemUpdatePlan {
     pub distribution: Distribution,
     pub command: Vec<String>,
     pub reboot_required_path: String,
+    pub full_upgrade: bool,
 }
 
 #[derive(Debug, Error)]
@@ -85,6 +88,7 @@ pub fn plan(contents: &str) -> Result<SystemUpdatePlan, HostError> {
         distribution,
         command,
         reboot_required_path: "/var/run/reboot-required".into(),
+        full_upgrade: false,
     })
 }
 
@@ -107,7 +111,12 @@ pub fn apply(plan: &SystemUpdatePlan, explicit_apply: bool) -> Result<(), HostEr
     }
     let commands: Vec<Vec<&str>> = match plan.distribution {
         Distribution::Debian | Distribution::Ubuntu => {
-            vec![vec!["apt-get", "update"], vec!["apt-get", "upgrade", "-y"]]
+            let upgrade = if plan.full_upgrade {
+                "full-upgrade"
+            } else {
+                "upgrade"
+            };
+            vec![vec!["apt-get", "update"], vec!["apt-get", upgrade, "-y"]]
         }
         Distribution::Alpine => vec![vec!["apk", "upgrade", "--no-cache"]],
         Distribution::Arch => vec![vec!["pacman", "-Syu", "--noconfirm"]],
@@ -147,6 +156,33 @@ pub fn reboot(explicit_apply: bool) -> Result<(), HostError> {
     }
 }
 
+pub fn apply_network_immunity(explicit_apply: bool) -> Result<(), HostError> {
+    if !explicit_apply {
+        return Err(HostError::ApplyNotExplicit);
+    }
+    let root = Path::new("/proc/1/root");
+    let root = if root.exists() { root } else { Path::new("/") };
+    let dhcpcd = root.join("etc/dhcpcd.conf");
+    if dhcpcd.exists() {
+        let contents = fs::read_to_string(&dhcpcd)?;
+        if !contents
+            .lines()
+            .any(|line| line.trim() == "denyinterfaces veth* docker* br-*")
+        {
+            let mut file = OpenOptions::new().append(true).open(dhcpcd)?;
+            writeln!(file, "denyinterfaces veth* docker* br-*")?;
+        }
+    }
+    let network_manager = root.join("etc/NetworkManager/conf.d");
+    if network_manager.is_dir() {
+        fs::write(
+            network_manager.join("99-systower-docker.conf"),
+            "[keyfile]\nunmanaged-devices=interface-name:veth*;interface-name:docker*;interface-name:br-*\n",
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +209,12 @@ mod tests {
     #[test]
     fn rejects_unknown_distribution() {
         assert!(matches!(plan("ID=plan9\n"), Err(HostError::Unsupported(_))));
+    }
+
+    #[test]
+    fn debian_plan_defaults_to_safe_upgrade() {
+        let plan = plan("ID=debian\n").unwrap();
+        assert!(!plan.full_upgrade);
+        assert_eq!(plan.command[4], "upgrade");
     }
 }

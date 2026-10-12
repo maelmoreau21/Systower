@@ -4,6 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::process::Command;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -71,6 +74,10 @@ impl Transaction {
                 image,
             },
         }
+    }
+
+    pub fn from_record(record: TransactionRecord) -> Self {
+        Self { record }
     }
 
     pub fn record(&self) -> &TransactionRecord {
@@ -192,6 +199,33 @@ impl StateJournal {
         }
         Ok(latest)
     }
+
+    pub fn interrupted(&self) -> Result<Vec<TransactionRecord>, StateError> {
+        let file = File::open(&self.path).map_err(|source| StateError::Read {
+            path: self.path.clone(),
+            source,
+        })?;
+        let mut records = std::collections::HashMap::new();
+        for line in BufReader::new(file).lines() {
+            let line = line.map_err(|source| StateError::Read {
+                path: self.path.clone(),
+                source,
+            })?;
+            let record: TransactionRecord = serde_json::from_str(&line)?;
+            records.insert(record.transaction_id.clone(), record);
+        }
+        Ok(records
+            .into_values()
+            .filter(|record| {
+                !matches!(
+                    record.state,
+                    TransactionState::Committed
+                        | TransactionState::RolledBack
+                        | TransactionState::RollbackFailed
+                )
+            })
+            .collect())
+    }
 }
 
 pub struct InstanceLock {
@@ -202,21 +236,63 @@ pub struct InstanceLock {
 impl InstanceLock {
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StateError> {
         let path = path.as_ref().to_path_buf();
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|source| {
-                if source.kind() == std::io::ErrorKind::AlreadyExists {
-                    StateError::AlreadyLocked(path.clone())
-                } else {
-                    StateError::Open {
+        let file = loop {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => break file,
+                Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let owner = fs::read_to_string(&path).ok();
+                    let stale = owner
+                        .as_deref()
+                        .and_then(|value| value.trim().parse::<u32>().ok())
+                        .is_some_and(|pid| !process_is_alive(pid));
+                    if stale
+                        || owner
+                            .as_deref()
+                            .is_some_and(|value| value.trim().is_empty())
+                    {
+                        let _ = fs::remove_file(&path);
+                        continue;
+                    }
+                    return Err(StateError::AlreadyLocked(path.clone()));
+                }
+                Err(source) => {
+                    return Err(StateError::Open {
                         path: path.clone(),
                         source,
-                    }
+                    });
                 }
-            })?;
+            }
+        };
+        let mut file = file;
+        writeln!(file, "{}", std::process::id()).map_err(|source| StateError::Write {
+            path: path.clone(),
+            source,
+        })?;
+        file.sync_data().map_err(|source| StateError::Write {
+            path: path.clone(),
+            source,
+        })?;
         Ok(Self { path, _file: file })
+    }
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        Path::new("/proc").join(pid.to_string()).exists()
+    }
+    #[cfg(windows)]
+    {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}")])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        true
     }
 }
 
@@ -270,6 +346,41 @@ mod tests {
         ));
         drop(lock);
         assert!(InstanceLock::acquire(&path).is_ok());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn stale_lock_owned_by_missing_process_is_reclaimed() {
+        let path = temp_path("stale-lock");
+        let _ = fs::remove_file(&path);
+        fs::write(&path, "4294967295\n").unwrap();
+        let lock = InstanceLock::acquire(&path).unwrap();
+        drop(lock);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn interrupted_returns_only_non_terminal_transactions() {
+        let path = temp_path("interrupted");
+        let _ = fs::remove_file(&path);
+        let journal = StateJournal::open(&path).unwrap();
+        let base = TransactionRecord {
+            transaction_id: "tx-active".into(),
+            container_id: "abc".into(),
+            state: TransactionState::ReplacementStarted,
+            image: "example:v2".into(),
+        };
+        journal.append(&base).unwrap();
+        journal
+            .append(&TransactionRecord {
+                transaction_id: "tx-done".into(),
+                state: TransactionState::Committed,
+                ..base.clone()
+            })
+            .unwrap();
+        let interrupted = journal.interrupted().unwrap();
+        assert_eq!(interrupted.len(), 1);
+        assert_eq!(interrupted[0].transaction_id, "tx-active");
         let _ = fs::remove_file(path);
     }
 

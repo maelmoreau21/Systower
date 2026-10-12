@@ -217,6 +217,93 @@ impl DockerEngine {
         Ok(Self { client })
     }
 
+    pub async fn recover_interrupted(&self, journal: &StateJournal) -> Result<(), DockerError> {
+        for record in journal.interrupted()? {
+            if record.state == TransactionState::Planned {
+                continue;
+            }
+            let mut transaction = Transaction::from_record(record.clone());
+            if transaction.record().state == TransactionState::ImagePulled {
+                transition(&mut transaction, TransactionState::RollingBack, journal)?;
+                transition(&mut transaction, TransactionState::RolledBack, journal)?;
+                continue;
+            }
+            let inspected = self
+                .client
+                .inspect_container(&record.container_id, None)
+                .await;
+            let current_name = inspected.ok().and_then(|inspect| {
+                serde_json::to_value(inspect)
+                    .ok()?
+                    .get("Name")
+                    .and_then(|name| name.as_str())
+                    .map(|name| name.trim_start_matches('/').to_owned())
+            });
+            let original_name = current_name
+                .as_deref()
+                .and_then(|name| name.strip_suffix("_systower_bak"))
+                .or(current_name.as_deref())
+                .map(str::to_owned);
+            let Some(original_name) = original_name else {
+                if transaction.record().state != TransactionState::RollingBack {
+                    transition(&mut transaction, TransactionState::RollingBack, journal)?;
+                }
+                transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
+                continue;
+            };
+            let backup_name = format!("{original_name}_systower_bak");
+            let backup_exists = self
+                .client
+                .inspect_container(&backup_name, None)
+                .await
+                .is_ok();
+            if !backup_exists {
+                if transaction.record().state != TransactionState::RollingBack {
+                    transition(&mut transaction, TransactionState::RollingBack, journal)?;
+                }
+                transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
+                continue;
+            }
+            let _ = self
+                .client
+                .remove_container(
+                    &original_name,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        link: false,
+                        v: false,
+                    }),
+                )
+                .await;
+            if transaction.record().state != TransactionState::RollingBack {
+                transition(&mut transaction, TransactionState::RollingBack, journal)?;
+            }
+            if let Err(error) = self
+                .client
+                .rename_container(
+                    &backup_name,
+                    RenameContainerOptions {
+                        name: &original_name,
+                    },
+                )
+                .await
+            {
+                transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
+                return Err(DockerError::RollbackFailed(error.to_string()));
+            }
+            if let Err(error) = self
+                .client
+                .start_container::<String>(&original_name, None::<StartContainerOptions<String>>)
+                .await
+            {
+                transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
+                return Err(DockerError::RollbackFailed(error.to_string()));
+            }
+            transition(&mut transaction, TransactionState::RolledBack, journal)?;
+        }
+        Ok(())
+    }
+
     pub async fn list_allowed(
         &self,
         policy: &ContainerPolicy,
