@@ -70,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             },
                             stop_timeout: config.docker_stop_timeout,
                             health_timeout,
+                            rollback_health_timeout: config.docker_rollback_healthcheck_timeout,
                             pull: !no_pull,
                             cleanup_old_image: config.docker_cleanup,
                         },

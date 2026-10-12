@@ -22,7 +22,10 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     };
     if !config.dry_run && !config.docker_monitor_only {
         if let Some(engine) = engine.as_ref() {
-            if let Err(error) = engine.recover_interrupted(&journal).await {
+            if let Err(error) = engine
+                .recover_interrupted(&journal, config.docker_rollback_healthcheck_timeout)
+                .await
+            {
                 warn!(%error, "interrupted Docker transaction recovery failed");
             }
         }
@@ -87,6 +90,7 @@ async fn run_cycle(
                     },
                     stop_timeout: config.docker_stop_timeout,
                     health_timeout: config.docker_healthcheck_timeout,
+                    rollback_health_timeout: config.docker_rollback_healthcheck_timeout,
                     pull: true,
                     cleanup_old_image: config.docker_cleanup,
                 },

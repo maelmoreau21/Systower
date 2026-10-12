@@ -29,6 +29,7 @@ pub struct Config {
     pub docker_monitor_only: bool,
     pub docker_stop_timeout: u64,
     pub docker_healthcheck_timeout: u64,
+    pub docker_rollback_healthcheck_timeout: u64,
     pub docker_protect_network_containers: bool,
     pub docker_protect_socket_containers: bool,
     pub docker_update_delay: u64,
@@ -66,6 +67,10 @@ impl Config {
             docker_healthcheck_timeout: positive_integer(
                 "SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT",
                 60,
+            )?,
+            docker_rollback_healthcheck_timeout: positive_integer(
+                "SYSTOWER_DOCKER_ROLLBACK_HEALTHCHECK_TIMEOUT",
+                120,
             )?,
             docker_protect_network_containers: boolean(
                 "SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS",

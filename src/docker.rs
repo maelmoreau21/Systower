@@ -68,6 +68,7 @@ pub struct UpdateOptions {
     pub health_policy: HealthPolicy,
     pub stop_timeout: u64,
     pub health_timeout: u64,
+    pub rollback_health_timeout: u64,
     pub pull: bool,
     pub cleanup_old_image: bool,
 }
@@ -88,8 +89,29 @@ impl RecreationConfig {
             config.host_config = Some(serde_json::from_value(host_config.clone())?);
         }
         if let Some(networks) = value.pointer("/NetworkSettings/Networks") {
+            let mut networks = networks.clone();
+            if let Some(networks) = networks.as_object_mut() {
+                for endpoint in networks
+                    .values_mut()
+                    .filter_map(|value| value.as_object_mut())
+                {
+                    for field in [
+                        "NetworkID",
+                        "EndpointID",
+                        "Gateway",
+                        "IPAddress",
+                        "IPPrefixLen",
+                        "IPv6Gateway",
+                        "GlobalIPv6Address",
+                        "GlobalIPv6PrefixLen",
+                        "MacAddress",
+                    ] {
+                        endpoint.remove(field);
+                    }
+                }
+            }
             let endpoints: std::collections::HashMap<String, EndpointSettings> =
-                serde_json::from_value(networks.clone())?;
+                serde_json::from_value(networks)?;
             config.networking_config = Some(NetworkingConfig {
                 endpoints_config: endpoints,
             });
@@ -219,17 +241,16 @@ impl DockerEngine {
         Ok(Self { client })
     }
 
-    pub async fn recover_interrupted(&self, journal: &StateJournal) -> Result<(), DockerError> {
+    pub async fn recover_interrupted(
+        &self,
+        journal: &StateJournal,
+        rollback_health_timeout: u64,
+    ) -> Result<(), DockerError> {
         for record in journal.interrupted()? {
             if record.state == TransactionState::Planned {
                 continue;
             }
             let mut transaction = Transaction::from_record(record.clone());
-            if transaction.record().state == TransactionState::ImagePulled {
-                transition(&mut transaction, TransactionState::RollingBack, journal)?;
-                transition(&mut transaction, TransactionState::RolledBack, journal)?;
-                continue;
-            }
             let inspected = self
                 .client
                 .inspect_container(&record.container_id, None)
@@ -260,6 +281,13 @@ impl DockerEngine {
                 .await
                 .is_ok();
             if !backup_exists {
+                if transaction.record().state == TransactionState::ImagePulled
+                    && current_name.as_deref() == Some(original_name.as_str())
+                {
+                    transition(&mut transaction, TransactionState::RollingBack, journal)?;
+                    transition(&mut transaction, TransactionState::RolledBack, journal)?;
+                    continue;
+                }
                 if transaction.record().state != TransactionState::RollingBack {
                     transition(&mut transaction, TransactionState::RollingBack, journal)?;
                 }
@@ -301,7 +329,17 @@ impl DockerEngine {
                 transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
                 return Err(DockerError::RollbackFailed(error.to_string()));
             }
-            if let Err(error) = self.verify_restored_container(&original_name).await {
+            if let Err(error) = self
+                .wait_for_health(
+                    &original_name,
+                    rollback_health_timeout,
+                    HealthPolicy {
+                        allow_no_healthcheck: true,
+                        stability_seconds: 5,
+                    },
+                )
+                .await
+            {
                 transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
                 return Err(DockerError::RollbackFailed(error));
             }
@@ -522,6 +560,7 @@ impl DockerEngine {
                         &mut transaction,
                         journal,
                         format!("container creation failed: {error}"),
+                        options.rollback_health_timeout,
                     )
                     .await;
             }
@@ -543,6 +582,7 @@ impl DockerEngine {
                     &mut transaction,
                     journal,
                     format!("replacement start failed: {error}"),
+                    options.rollback_health_timeout,
                 )
                 .await;
         }
@@ -552,7 +592,14 @@ impl DockerEngine {
             .await
         {
             return self
-                .rollback_after_failure(&name, &backup_name, &mut transaction, journal, error)
+                .rollback_after_failure(
+                    &name,
+                    &backup_name,
+                    &mut transaction,
+                    journal,
+                    error,
+                    options.rollback_health_timeout,
+                )
                 .await;
         }
         self.client
@@ -653,6 +700,7 @@ impl DockerEngine {
         transaction: &mut Transaction,
         journal: &StateJournal,
         reason: String,
+        rollback_health_timeout: u64,
     ) -> Result<UpdateResult, DockerError> {
         transition(transaction, TransactionState::RollingBack, journal)?;
         let _ = self
@@ -686,7 +734,17 @@ impl DockerEngine {
                 "{reason}; restore start failed: {error}"
             )));
         }
-        if let Err(error) = self.verify_restored_container(name).await {
+        if let Err(error) = self
+            .wait_for_health(
+                name,
+                rollback_health_timeout,
+                HealthPolicy {
+                    allow_no_healthcheck: true,
+                    stability_seconds: 5,
+                },
+            )
+            .await
+        {
             transition(transaction, TransactionState::RollbackFailed, journal)?;
             return Err(DockerError::RollbackFailed(format!("{reason}; {error}")));
         }
@@ -694,41 +752,6 @@ impl DockerEngine {
         Err(DockerError::UpdateFailed(format!(
             "{reason}; rollback verified"
         )))
-    }
-
-    async fn verify_restored_container(&self, name: &str) -> Result<(), String> {
-        let restored = self
-            .client
-            .inspect_container(name, None)
-            .await
-            .map_err(|error| format!("restored container inspection failed: {error}"))?;
-        let restored_value = serde_json::to_value(restored)
-            .map_err(|error| format!("restored container inspection was invalid: {error}"))?;
-        if restored_value
-            .pointer("/State/Running")
-            .and_then(|running| running.as_bool())
-            != Some(true)
-        {
-            return Err("restored container is not running".into());
-        }
-        let health = restored_value.pointer("/State/Health/Status");
-        if health.is_some() && health.and_then(|status| status.as_str()) != Some("healthy") {
-            return Err(format!(
-                "restored container health is '{}', not healthy",
-                health
-                    .and_then(|status| status.as_str())
-                    .unwrap_or("unknown")
-            ));
-        }
-        if restored_value
-            .pointer("/RestartCount")
-            .and_then(|count| count.as_u64())
-            .unwrap_or(0)
-            != 0
-        {
-            return Err("restored container is restarting".into());
-        }
-        Ok(())
     }
 }
 
@@ -783,5 +806,35 @@ mod tests {
         };
         let snapshot = ContainerSnapshot::from_summary(summary).unwrap();
         assert!(!snapshot.facts().is_self);
+    }
+
+    #[test]
+    fn recreation_config_drops_runtime_network_identity_but_keeps_compose_aliases() {
+        let inspect: ContainerInspectResponse = serde_json::from_value(serde_json::json!({
+            "Config": {},
+            "HostConfig": {},
+            "NetworkSettings": {
+                "Networks": {
+                    "app_default": {
+                        "Aliases": ["api", "backend"],
+                        "IPAddress": "172.20.0.4",
+                        "NetworkID": "network-id",
+                        "EndpointID": "endpoint-id"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let recreation = RecreationConfig::from_inspect(&inspect, "example/api:v2").unwrap();
+        let endpoints = recreation
+            .config
+            .networking_config
+            .unwrap()
+            .endpoints_config;
+        let endpoint = serde_json::to_value(endpoints.get("app_default").unwrap()).unwrap();
+        assert_eq!(endpoint["Aliases"], serde_json::json!(["api", "backend"]));
+        assert!(endpoint.get("IPAddress").is_none());
+        assert!(endpoint.get("NetworkID").is_none());
+        assert!(endpoint.get("EndpointID").is_none());
     }
 }
