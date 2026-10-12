@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path, process::Command};
 
 use thiserror::Error;
 
@@ -25,6 +25,14 @@ pub enum HostError {
     Unsupported(String),
     #[error("host updates require explicit apply mode")]
     ApplyNotExplicit,
+    #[error("cannot read host release information: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("host command '{command}' failed with status {status}")]
+    CommandFailed { command: String, status: String },
+    #[error("host command '{0}' could not be started: {1}")]
+    CommandStart(String, std::io::Error),
+    #[error("host reboot failed: {0}")]
+    RebootFailed(String),
 }
 
 pub fn parse_os_release(contents: &str) -> HashMap<String, String> {
@@ -80,11 +88,63 @@ pub fn plan(contents: &str) -> Result<SystemUpdatePlan, HostError> {
     })
 }
 
-pub fn apply(_plan: &SystemUpdatePlan, explicit_apply: bool) -> Result<(), HostError> {
+fn host_command(command: &[&str]) -> Command {
+    if Path::new("/proc/1/root").exists() {
+        let mut process = Command::new("nsenter");
+        process.args(["-t", "1", "-m", "-u", "-n", "-i", "--"]);
+        process.args(command);
+        process
+    } else {
+        let mut process = Command::new(command[0]);
+        process.args(&command[1..]);
+        process
+    }
+}
+
+pub fn apply(plan: &SystemUpdatePlan, explicit_apply: bool) -> Result<(), HostError> {
     if !explicit_apply {
         return Err(HostError::ApplyNotExplicit);
     }
-    Err(HostError::ApplyNotExplicit)
+    let commands: Vec<Vec<&str>> = match plan.distribution {
+        Distribution::Debian | Distribution::Ubuntu => {
+            vec![vec!["apt-get", "update"], vec!["apt-get", "upgrade", "-y"]]
+        }
+        Distribution::Alpine => vec![vec!["apk", "upgrade", "--no-cache"]],
+        Distribution::Arch => vec![vec!["pacman", "-Syu", "--noconfirm"]],
+        Distribution::Fedora => vec![vec!["dnf", "upgrade", "-y"]],
+        Distribution::Unknown => return Err(HostError::Unsupported("unknown".into())),
+    };
+    for command in commands {
+        let status = host_command(&command)
+            .status()
+            .map_err(|source| HostError::CommandStart(command.join(" "), source))?;
+        if !status.success() {
+            return Err(HostError::CommandFailed {
+                command: command.join(" "),
+                status: status.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn reboot_required(plan: &SystemUpdatePlan) -> bool {
+    let host_path = Path::new("/proc/1/root").join(&plan.reboot_required_path[1..]);
+    host_path.exists() || Path::new(&plan.reboot_required_path).exists()
+}
+
+pub fn reboot(explicit_apply: bool) -> Result<(), HostError> {
+    if !explicit_apply {
+        return Err(HostError::ApplyNotExplicit);
+    }
+    let status = host_command(&["reboot"])
+        .status()
+        .map_err(|source| HostError::CommandStart("reboot".into(), source))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(HostError::RebootFailed(status.to_string()))
+    }
 }
 
 #[cfg(test)]

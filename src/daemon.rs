@@ -39,7 +39,10 @@ async fn run_cycle(
     journal: &StateJournal,
     notifier: Option<&Notifier>,
 ) {
-    let containers = match engine.list_allowed(&config.policy()).await {
+    let containers = match engine
+        .list_allowed_with_self(&config.policy(), config.update_self)
+        .await
+    {
         Ok(containers) => containers,
         Err(error) => {
             error!(%error, "cannot enumerate Docker containers");
@@ -93,5 +96,40 @@ async fn run_cycle(
             }
         }
         tokio::time::sleep(Duration::from_secs(config.docker_update_delay)).await;
+    }
+
+    if config.docker_prune.eq_ignore_ascii_case("true")
+        || config.docker_prune.eq_ignore_ascii_case("all")
+        || config.docker_prune_all
+    {
+        let prune_all = config.docker_prune.eq_ignore_ascii_case("all") || config.docker_prune_all;
+        match engine
+            .prune_images(prune_all, Some(&config.docker_prune_until))
+            .await
+        {
+            Ok(space_reclaimed) => info!(space_reclaimed, "unused Docker images pruned"),
+            Err(error) => warn!(%error, "Docker image pruning failed"),
+        }
+    }
+
+    if config.system_enabled {
+        if config.dry_run {
+            info!("host package update planned (dry run)");
+            return;
+        }
+        let result = std::fs::read_to_string("/proc/1/root/etc/os-release")
+            .or_else(|_| std::fs::read_to_string("/etc/os-release"))
+            .map_err(crate::host::HostError::from)
+            .and_then(|contents| crate::host::plan(&contents))
+            .and_then(|plan| crate::host::apply(&plan, true).map(|_| plan));
+        match result {
+            Ok(plan) if config.system_reboot && crate::host::reboot_required(&plan) => {
+                if let Err(error) = crate::host::reboot(true) {
+                    warn!(%error, "host reboot failed");
+                }
+            }
+            Ok(_) => info!("host package update completed"),
+            Err(error) => warn!(%error, "host package update failed"),
+        }
     }
 }

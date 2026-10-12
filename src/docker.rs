@@ -9,7 +9,7 @@ use bollard::{
         RemoveContainerOptions, RenameContainerOptions, StartContainerOptions,
         StopContainerOptions,
     },
-    image::{CreateImageOptions, RemoveImageOptions},
+    image::{CreateImageOptions, PruneImagesOptions, RemoveImageOptions},
     models::{ContainerInspectResponse, ContainerSummary, EndpointSettings},
     Docker,
 };
@@ -30,8 +30,6 @@ pub enum DockerError {
     InvalidInspect(#[from] serde_json::Error),
     #[error("Docker did not return an image identity for '{0}'")]
     MissingImageIdentity(String),
-    #[error("Compose container '{0}' cannot be recreated without its source project")]
-    ComposeSourceUnavailable(String),
     #[error("Docker update failed: {0}")]
     UpdateFailed(String),
     #[error("rollback failed: {0}")]
@@ -80,19 +78,6 @@ impl RecreationConfig {
         target_image: impl Into<String>,
     ) -> Result<Self, DockerError> {
         let value = serde_json::to_value(inspect)?;
-        let name = value
-            .get("Name")
-            .and_then(|name| name.as_str())
-            .unwrap_or_default()
-            .trim_start_matches('/')
-            .to_owned();
-        let labels = value
-            .pointer("/Config/Labels")
-            .and_then(|labels| labels.as_object());
-        if labels.is_some_and(|labels| labels.contains_key("com.docker.compose.project")) {
-            return Err(DockerError::ComposeSourceUnavailable(name));
-        }
-
         let config_value = value
             .get("Config")
             .cloned()
@@ -236,6 +221,14 @@ impl DockerEngine {
         &self,
         policy: &ContainerPolicy,
     ) -> Result<Vec<ContainerSnapshot>, DockerError> {
+        self.list_allowed_with_self(policy, false).await
+    }
+
+    pub async fn list_allowed_with_self(
+        &self,
+        policy: &ContainerPolicy,
+        include_self: bool,
+    ) -> Result<Vec<ContainerSnapshot>, DockerError> {
         let summaries = self
             .client
             .list_containers(Some(ListContainersOptions::<String> {
@@ -250,7 +243,10 @@ impl DockerEngine {
             };
             let inspect = self.client.inspect_container(&container.id, None).await?;
             container.apply_inspect(&inspect)?;
-            if policy.allows(&container.facts()) {
+            let facts = container.facts();
+            if (include_self && facts.is_self && !facts.excluded_by_label)
+                || (!facts.is_self && policy.allows(&facts))
+            {
                 allowed.push(container);
             }
         }
@@ -278,6 +274,23 @@ impl DockerEngine {
             .filter(|id| !id.is_empty())
             .ok_or_else(|| DockerError::MissingImageIdentity(image.to_owned()))?;
         Ok(identity.to_owned())
+    }
+
+    pub async fn prune_images(
+        &self,
+        prune_all: bool,
+        until: Option<&str>,
+    ) -> Result<u64, DockerError> {
+        let mut filters = HashMap::new();
+        filters.insert("dangling".to_owned(), vec![(!prune_all).to_string()]);
+        if let Some(until) = until.filter(|value| !value.is_empty()) {
+            filters.insert("until".to_owned(), vec![until.to_owned()]);
+        }
+        let result = self
+            .client
+            .prune_images(Some(PruneImagesOptions { filters }))
+            .await?;
+        Ok(result.space_reclaimed.unwrap_or(0).max(0) as u64)
     }
 
     pub async fn recreation_config(

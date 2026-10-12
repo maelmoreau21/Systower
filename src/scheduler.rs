@@ -1,6 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
-use chrono::Utc;
+use chrono::Local;
 use cron::Schedule;
 use thiserror::Error;
 
@@ -16,9 +16,9 @@ pub fn delay_until_next(cron_expression: &str) -> Result<Duration, SchedulerErro
     let expression = format!("0 {cron_expression}");
     let schedule = Schedule::from_str(&expression)
         .map_err(|error| SchedulerError::InvalidCron(error.to_string()))?;
-    let now = Utc::now();
+    let now = Local::now();
     let next = schedule
-        .upcoming(Utc)
+        .upcoming(Local)
         .next()
         .ok_or(SchedulerError::NoNextOccurrence)?;
     (next - now)

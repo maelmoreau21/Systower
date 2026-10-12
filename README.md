@@ -137,7 +137,7 @@ Systower includes built-in safeguards:
 
 ### V2 CLI preview
 
-The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are refused unless their source project can be safely resolved.
+The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are recreated from their inspected Docker configuration.
 
 | Environment Variable | Default | Description |
 |:---|:---|:---|
@@ -145,7 +145,7 @@ The Rust implementation currently supports `systower check`, `systower docker ch
 | `SYSTOWER_RUN_ON_START` | `true` | Run update check immediately upon container startup |
 | `SYSTOWER_LOG_LEVEL` | `info` | Logging verbosity: `debug`, `info`, `warn`, `error` |
 | `SYSTOWER_DRY_RUN` | `false` | Dry run simulation mode (no changes made) |
-| `TZ` | `UTC` | Timezone (e.g. `Europe/Paris`, `America/New_York`) |
+| `TZ` | local system timezone | Timezone used by the cron scheduler (e.g. `Europe/Paris`, `America/New_York`) |
 | `SYSTOWER_DOCKER_ENABLED` | `true` | Enable Docker container updates |
 | `SYSTOWER_DOCKER_CLEANUP` | `true` | Delete previous image after successful container update |
 | `SYSTOWER_DOCKER_PRUNE` | `false` | Prune unused images: `false` (disabled), `true` (dangling only), or `all` (all unused images) |

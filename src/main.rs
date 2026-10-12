@@ -81,18 +81,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::System(args) => match args.command {
             SystemCommand::Check => {
-                let contents = std::fs::read_to_string("/etc/os-release")?;
+                let contents = std::fs::read_to_string("/proc/1/root/etc/os-release")
+                    .or_else(|_| std::fs::read_to_string("/etc/os-release"))?;
                 let plan = host::plan(&contents)?;
                 println!("distribution: {:?}", plan.distribution);
                 println!("package command: {}", plan.command.join(" "));
             }
             SystemCommand::Update { dry_run } => {
-                let contents = std::fs::read_to_string("/etc/os-release")?;
+                let contents = std::fs::read_to_string("/proc/1/root/etc/os-release")
+                    .or_else(|_| std::fs::read_to_string("/etc/os-release"))?;
                 let plan = host::plan(&contents)?;
                 println!("distribution: {:?}", plan.distribution);
                 println!("planned command: {}", plan.command.join(" "));
                 if !dry_run {
-                    host::apply(&plan, false)?;
+                    host::apply(&plan, true)?;
+                    if config.system_reboot && host::reboot_required(&plan) {
+                        host::reboot(true)?;
+                    }
                 }
             }
         },
