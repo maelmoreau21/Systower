@@ -1,7 +1,7 @@
 # ============================================================================
 # Systower 2.0.0 — Build & Push Rust Docker Image to GHCR
 # ============================================================================
-# Triggered on push to main branch and version tags.
+# Triggered on push to main/develop branches and version tags.
 # Builds multi-arch image (amd64, arm64, arm/v7) and pushes to GitHub Container Registry.
 # ============================================================================
 
@@ -9,7 +9,7 @@ name: Build & Push Docker Image
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "develop"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -52,6 +52,8 @@ jobs:
           tags: |
             # Tag with "latest" on main branch
             type=raw,value=latest,enable={{is_default_branch}}
+            # Tag development builds for easy testing
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             # Tag with version on version tags (v2.0.0 -> 2.0.0)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
