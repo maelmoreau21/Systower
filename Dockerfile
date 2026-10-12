@@ -1,66 +1,27 @@
-# ============================================================================
-# Systower — Ultra-lightweight Docker Image (v1.0.0)
-# ============================================================================
-# Based on Alpine Linux. Total image size ~25-30MB, RAM usage < 2MB.
-# Includes: docker-cli, jq, bash, curl, tzdata, util-linux (nsenter)
-# ============================================================================
+FROM rust:1.88-alpine AS builder
+
+RUN apk add --no-cache musl-dev
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY benches ./benches
+RUN cargo build --release
 
 FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /build/target/release/systower /usr/local/bin/systower
 
-LABEL maintainer="Mael"
-LABEL org.opencontainers.image.title="Systower"
-LABEL org.opencontainers.image.description="Ultra-lightweight Docker container & local host system updater — an improved Watchtower alternative"
-LABEL org.opencontainers.image.source="https://github.com/maelmoreau21/Systower"
-LABEL org.opencontainers.image.licenses="MIT"
-
-# Install only essential runtime tools and create directories
-RUN apk add --no-cache \
-    bash \
-    curl \
-    docker-cli \
-    jq \
-    tzdata \
-    util-linux \
-    && mkdir -p /config /scripts /var/log
-
-# Copy scripts
-COPY scripts/ /scripts/
-
-# Make all scripts executable and create log files
-RUN chmod +x /scripts/*.sh \
-    && touch /var/log/systower.log
-
-# Default environment variables
 ENV SYSTOWER_CRON="0 4 * * *" \
     SYSTOWER_RUN_ON_START="true" \
     SYSTOWER_DOCKER_ENABLED="true" \
     SYSTOWER_SYSTEM_ENABLED="false" \
-    SYSTOWER_DOCKER_EXCLUDE="" \
-    SYSTOWER_DOCKER_INCLUDE_ONLY="" \
-    SYSTOWER_DOCKER_CLEANUP="true" \
-    SYSTOWER_DOCKER_PRUNE="false" \
-    SYSTOWER_DOCKER_PRUNE_ALL="false" \
-    SYSTOWER_DOCKER_PRUNE_UNTIL="" \
-    SYSTOWER_DOCKER_STOP_TIMEOUT="30" \
-    SYSTOWER_DOCKER_MONITOR_ONLY="false" \
     SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT="60" \
-    SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS="false" \
-    SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS="false" \
-    SYSTOWER_DOCKER_UPDATE_DELAY="2" \
-    SYSTOWER_UPDATE_SELF="true" \
-    SYSTOWER_SYSTEM_REBOOT="false" \
-    SYSTOWER_NOTIFY_ENABLED="false" \
-    SYSTOWER_NOTIFY_DISCORD="" \
-    SYSTOWER_NOTIFY_SLACK="" \
-    SYSTOWER_NOTIFY_TELEGRAM_TOKEN="" \
-    SYSTOWER_NOTIFY_TELEGRAM_CHAT="" \
-    SYSTOWER_NOTIFY_WEBHOOK="" \
-    SYSTOWER_LOG_LEVEL="info" \
-    SYSTOWER_DRY_RUN="false" \
-    TZ="UTC"
+    SYSTOWER_DOCKER_STOP_TIMEOUT="30" \
+    SYSTOWER_DOCKER_ALLOW_NO_HEALTHCHECK="false" \
+    SYSTOWER_STATE_FILE="/var/lib/systower/state.jsonl" \
+    SYSTOWER_LOG_LEVEL="info"
 
-# Health check — verify crond daemon is alive
-HEALTHCHECK --interval=30s --timeout=3s --start-period=2s --retries=2 \
-    CMD pgrep crond > /dev/null || exit 1
-
-ENTRYPOINT ["/scripts/entrypoint.sh"]
+RUN mkdir -p /var/lib/systower
+VOLUME ["/var/lib/systower"]
+ENTRYPOINT ["/usr/local/bin/systower"]
+CMD ["run"]

@@ -1,6 +1,6 @@
 # Systower V2 plan
 
-V2 is developed on the `rust-v2` branch while the Bash implementation remains available as the V1 compatibility reference.
+Systower 2.0.0 is the current implementation. This plan records the completed Rust rewrite and its remaining hardening work.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ systower (CLI + daemon)
   notify       bounded, redacted event delivery
 ```
 
-The current read-only slice contains configuration, policy, CLI validation, native Docker discovery, inspected safety facts, and image-identity planning. Docker mutations will not be added until the typed snapshot and transaction contracts are tested.
+The current slice contains typed configuration, policy, native Docker discovery, verified image pulls, inspected safety facts, transaction journaling, health evaluation, real replacement and rollback, cron daemon wiring, notifications, host update planning, and a V2 container image.
 
 ## V1 findings driving the design
 
@@ -28,13 +28,13 @@ The current read-only slice contains configuration, policy, CLI validation, nati
 ## Implementation order
 
 1. Typed configuration, CLI validation, and policy tests.
-2. Docker API adapter with inspected safety facts and a read-only `docker check` command.
-3. Persistent transaction journal, process lock, and explicit update state machine.
-4. Image resolution, pull verification, container replacement, health policy, and verified rollback.
-5. Compose detection with safe exclusion when the original project files are unavailable.
-6. Notifications, retention, and V1 environment migration documentation.
-7. Optional host agent with namespace verification and simulation mode.
-8. Integration tests against an isolated Docker Engine, CI, multi-architecture image, and measured benchmarks.
+2. Docker API adapter with inspected safety facts and a read-only `docker check` command. **Done.**
+3. Persistent transaction journal, process lock, and explicit update state machine. **Done.**
+4. Image resolution, pull verification, container replacement, health policy, and verified rollback. **Done for manual updates; automatic discovery still needs registry comparison.**
+5. Compose detection with safe exclusion when the original project files are unavailable. **Safe exclusion done; Compose source resolution remains.**
+6. Notifications, retention, and V1 environment migration documentation. **Done for notifications, retention, and migration docs.**
+7. Optional host agent with namespace verification and simulation mode. **Planning and simulation done; privileged execution remains deliberately disabled.**
+8. Integration tests against an isolated Docker Engine, CI, multi-architecture image, and measured benchmarks. **Docker tests, CI, and benchmark harness done; multi-architecture rebuild and benchmark measurements remain.**
 
 ## Initial V1 compatibility contract
 

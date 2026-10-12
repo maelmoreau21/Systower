@@ -13,11 +13,28 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    Run,
     Status,
     Check,
     Docker(DockerArgs),
+    System(SystemArgs),
     Config(ConfigArgs),
     Version,
+}
+
+#[derive(Debug, Args)]
+pub struct SystemArgs {
+    #[command(subcommand)]
+    pub command: SystemCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SystemCommand {
+    Check,
+    Update {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -29,6 +46,28 @@ pub struct DockerArgs {
 #[derive(Debug, Subcommand)]
 pub enum DockerCommand {
     Check,
+    InspectConfig {
+        #[arg(long)]
+        container: String,
+        #[arg(long)]
+        image: String,
+    },
+    Update {
+        #[arg(long)]
+        container: String,
+        #[arg(long)]
+        image: String,
+        #[arg(long, default_value_t = 60)]
+        health_timeout: u64,
+        #[arg(long)]
+        allow_no_healthcheck: bool,
+        #[arg(long)]
+        no_pull: bool,
+    },
+    Pull {
+        #[arg(long)]
+        image: String,
+    },
 }
 
 #[derive(Debug, Args)]

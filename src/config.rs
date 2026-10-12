@@ -36,6 +36,14 @@ pub struct Config {
     pub log_level: String,
     pub include_only: Vec<String>,
     pub exclude: Vec<String>,
+    pub state_file: String,
+    pub docker_allow_no_healthcheck: bool,
+    pub notify_enabled: bool,
+    pub notify_webhook: String,
+    pub notify_discord: String,
+    pub notify_slack: String,
+    pub notify_telegram_token: String,
+    pub notify_telegram_chat: String,
 }
 
 impl Config {
@@ -67,6 +75,14 @@ impl Config {
             log_level: value("SYSTOWER_LOG_LEVEL", "info"),
             include_only: csv("SYSTOWER_DOCKER_INCLUDE_ONLY"),
             exclude: csv("SYSTOWER_DOCKER_EXCLUDE"),
+            state_file: value("SYSTOWER_STATE_FILE", "./systower-state.jsonl"),
+            docker_allow_no_healthcheck: boolean("SYSTOWER_DOCKER_ALLOW_NO_HEALTHCHECK", false)?,
+            notify_enabled: boolean("SYSTOWER_NOTIFY_ENABLED", false)?,
+            notify_webhook: value("SYSTOWER_NOTIFY_WEBHOOK", ""),
+            notify_discord: value("SYSTOWER_NOTIFY_DISCORD", ""),
+            notify_slack: value("SYSTOWER_NOTIFY_SLACK", ""),
+            notify_telegram_token: value("SYSTOWER_NOTIFY_TELEGRAM_TOKEN", ""),
+            notify_telegram_chat: value("SYSTOWER_NOTIFY_TELEGRAM_CHAT", ""),
         };
         config.validate()?;
         Ok(config)
@@ -74,6 +90,9 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.cron.split_whitespace().count() != 5 {
+            return Err(ConfigError::InvalidCron);
+        }
+        if crate::scheduler::delay_until_next(&self.cron).is_err() {
             return Err(ConfigError::InvalidCron);
         }
         if self.docker_healthcheck_timeout == 0 {
@@ -131,7 +150,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_match_v1_core_values() {
+    fn defaults_match_core_values() {
         let config = Config::from_env().expect("defaults should be valid");
         assert_eq!(config.cron, "0 4 * * *");
         assert!(config.docker_enabled);

@@ -19,6 +19,8 @@
 
 ---
 
+> **Systower 2.0.0:** the Rust implementation is the current and supported implementation. The former Bash implementation has been removed.
+
 ## ✨ Features
 
 - 🐳 **Docker Container Updates** — Pull latest images and recreate containers preserving full configuration (networks, volumes, ports, caps, devices, env, restart policies).
@@ -133,6 +135,10 @@ Systower includes built-in safeguards:
 
 ## ⚙️ Configuration Reference
 
+### V2 CLI preview
+
+The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are refused unless their source project can be safely resolved.
+
 | Environment Variable | Default | Description |
 |:---|:---|:---|
 | `SYSTOWER_CRON` | `0 4 * * *` | Cron schedule for main update cycle |
@@ -157,6 +163,8 @@ Systower includes built-in safeguards:
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Auto-reboot host system if kernel/packages require it |
 | `SYSTOWER_NOTIFY_ENABLED` | `false` | Enable notifications dispatcher |
+| `SYSTOWER_STATE_FILE` | `./systower-state.jsonl` | Persistent V2 transaction journal |
+| `SYSTOWER_DOCKER_ALLOW_NO_HEALTHCHECK` | `false` | Explicitly allow stable running containers without a Docker healthcheck |
 
 ---
 

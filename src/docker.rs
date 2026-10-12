@@ -1,13 +1,26 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use bollard::{
-    container::ListContainersOptions,
-    models::{ContainerInspectResponse, ContainerSummary},
+    container::{
+        Config as DockerConfig, CreateContainerOptions, ListContainersOptions, NetworkingConfig,
+        RemoveContainerOptions, RenameContainerOptions, StartContainerOptions,
+        StopContainerOptions,
+    },
+    image::{CreateImageOptions, RemoveImageOptions},
+    models::{ContainerInspectResponse, ContainerSummary, EndpointSettings},
     Docker,
 };
+use futures_util::StreamExt;
 use thiserror::Error;
 
 use crate::policy::{ContainerFacts, ContainerPolicy};
+use crate::{
+    state::{StateError, StateJournal, Transaction, TransactionState},
+    update::{health_is_acceptable, HealthPolicy, HealthStatus},
+};
 
 #[derive(Debug, Error)]
 pub enum DockerError {
@@ -15,6 +28,16 @@ pub enum DockerError {
     Api(#[from] bollard::errors::Error),
     #[error("Docker returned an invalid inspection response: {0}")]
     InvalidInspect(#[from] serde_json::Error),
+    #[error("Docker did not return an image identity for '{0}'")]
+    MissingImageIdentity(String),
+    #[error("Compose container '{0}' cannot be recreated without its source project")]
+    ComposeSourceUnavailable(String),
+    #[error("Docker update failed: {0}")]
+    UpdateFailed(String),
+    #[error("rollback failed: {0}")]
+    RollbackFailed(String),
+    #[error("state journal error: {0}")]
+    State(#[from] StateError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +52,65 @@ pub struct ContainerSnapshot {
     pub mounts_docker_socket: bool,
     pub network_mode: String,
     pub capabilities: Vec<String>,
+}
+
+pub struct RecreationConfig {
+    pub config: DockerConfig<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateResult {
+    pub container_name: String,
+    pub state: TransactionState,
+    pub target_image_id: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UpdateOptions {
+    pub health_policy: HealthPolicy,
+    pub stop_timeout: u64,
+    pub health_timeout: u64,
+    pub pull: bool,
+    pub cleanup_old_image: bool,
+}
+
+impl RecreationConfig {
+    pub fn from_inspect(
+        inspect: &ContainerInspectResponse,
+        target_image: impl Into<String>,
+    ) -> Result<Self, DockerError> {
+        let value = serde_json::to_value(inspect)?;
+        let name = value
+            .get("Name")
+            .and_then(|name| name.as_str())
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_owned();
+        let labels = value
+            .pointer("/Config/Labels")
+            .and_then(|labels| labels.as_object());
+        if labels.is_some_and(|labels| labels.contains_key("com.docker.compose.project")) {
+            return Err(DockerError::ComposeSourceUnavailable(name));
+        }
+
+        let config_value = value
+            .get("Config")
+            .cloned()
+            .ok_or_else(|| DockerError::MissingImageIdentity("container config".into()))?;
+        let mut config: DockerConfig<String> = serde_json::from_value(config_value)?;
+        config.image = Some(target_image.into());
+        if let Some(host_config) = value.get("HostConfig") {
+            config.host_config = Some(serde_json::from_value(host_config.clone())?);
+        }
+        if let Some(networks) = value.pointer("/NetworkSettings/Networks") {
+            let endpoints: std::collections::HashMap<String, EndpointSettings> =
+                serde_json::from_value(networks.clone())?;
+            config.networking_config = Some(NetworkingConfig {
+                endpoints_config: endpoints,
+            });
+        }
+        Ok(Self { config })
+    }
 }
 
 impl ContainerSnapshot {
@@ -106,6 +188,18 @@ impl ContainerSnapshot {
 
     pub fn facts(&self) -> ContainerFacts {
         let image_and_name = format!("{} {}", self.name, self.image).to_ascii_lowercase();
+        let image_name = self
+            .image
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .split(':')
+            .next()
+            .unwrap_or_default();
+        let compose_service_is_self = self
+            .labels
+            .get("com.docker.compose.service")
+            .is_some_and(|service| service.eq_ignore_ascii_case("systower"));
         ContainerFacts {
             name: self.name.clone(),
             excluded_by_label: self
@@ -120,7 +214,9 @@ impl ContainerSnapshot {
             mounts_docker_socket: self.mounts_docker_socket,
             network_mode: self.network_mode.clone(),
             capabilities: self.capabilities.clone(),
-            is_self: image_and_name.contains("systower"),
+            is_self: self.name.eq_ignore_ascii_case("systower")
+                || compose_service_is_self
+                || image_name.eq_ignore_ascii_case("systower"),
         }
     }
 }
@@ -160,6 +256,357 @@ impl DockerEngine {
         }
         Ok(allowed)
     }
+
+    pub async fn pull_image(&self, image: &str) -> Result<String, DockerError> {
+        let image = image.trim();
+        if image.is_empty() {
+            return Err(DockerError::MissingImageIdentity(image.to_owned()));
+        }
+        let options = CreateImageOptions {
+            from_image: image,
+            ..Default::default()
+        };
+        let mut stream = self.client.create_image(Some(options), None, None);
+        while let Some(result) = stream.next().await {
+            result?;
+        }
+        let inspected = self.client.inspect_image(image).await?;
+        let value = serde_json::to_value(inspected)?;
+        let identity = value
+            .get("Id")
+            .and_then(|id| id.as_str())
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| DockerError::MissingImageIdentity(image.to_owned()))?;
+        Ok(identity.to_owned())
+    }
+
+    pub async fn recreation_config(
+        &self,
+        container_id: &str,
+        target_image: impl Into<String>,
+    ) -> Result<RecreationConfig, DockerError> {
+        let inspect = self.client.inspect_container(container_id, None).await?;
+        RecreationConfig::from_inspect(&inspect, target_image)
+    }
+
+    async fn inspect_image_identity(&self, image: &str) -> Result<String, DockerError> {
+        let inspected = self.client.inspect_image(image).await?;
+        let value = serde_json::to_value(inspected)?;
+        value
+            .get("Id")
+            .and_then(|id| id.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| DockerError::MissingImageIdentity(image.to_owned()))
+    }
+
+    pub async fn update_container(
+        &self,
+        container_id: &str,
+        target_image: &str,
+        journal: &StateJournal,
+        options: UpdateOptions,
+    ) -> Result<UpdateResult, DockerError> {
+        let inspect = self.client.inspect_container(container_id, None).await?;
+        let value = serde_json::to_value(&inspect)?;
+        let name = value
+            .get("Name")
+            .and_then(|name| name.as_str())
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_owned();
+        if name.is_empty() {
+            return Err(DockerError::UpdateFailed("container has no name".into()));
+        }
+        if value
+            .pointer("/HostConfig/AutoRemove")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            return Err(DockerError::UpdateFailed(
+                "containers with AutoRemove=true cannot be safely rolled back".into(),
+            ));
+        }
+        let old_image_id = value
+            .get("Image")
+            .and_then(|image| image.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let target_image_id = if options.pull {
+            self.pull_image(target_image).await?
+        } else {
+            self.inspect_image_identity(target_image).await?
+        };
+        if target_image_id == old_image_id {
+            return Ok(UpdateResult {
+                container_name: name,
+                state: TransactionState::Committed,
+                target_image_id,
+            });
+        }
+
+        let transaction_id = format!(
+            "tx-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|error| DockerError::UpdateFailed(error.to_string()))?
+                .as_nanos()
+        );
+        let mut transaction = Transaction::new(
+            transaction_id,
+            container_id.to_owned(),
+            target_image.to_owned(),
+        );
+        journal.append(transaction.record())?;
+        transition(&mut transaction, TransactionState::ImagePulled, journal)?;
+        let recreation = RecreationConfig::from_inspect(&inspect, target_image)?;
+        let backup_name = format!("{name}_systower_bak");
+        if self
+            .client
+            .inspect_container(&backup_name, None)
+            .await
+            .is_ok()
+        {
+            return Err(DockerError::UpdateFailed(format!(
+                "backup container '{backup_name}' already exists"
+            )));
+        }
+
+        let running = value
+            .pointer("/State/Running")
+            .and_then(|running| running.as_bool())
+            .unwrap_or(false);
+        if running {
+            self.client
+                .stop_container(
+                    container_id,
+                    Some(StopContainerOptions {
+                        t: options.stop_timeout as i64,
+                    }),
+                )
+                .await?;
+        }
+        self.client
+            .rename_container(
+                container_id,
+                RenameContainerOptions {
+                    name: backup_name.as_str(),
+                },
+            )
+            .await?;
+        transition(&mut transaction, TransactionState::BackupCreated, journal)?;
+
+        let created = match self
+            .client
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: name.as_str(),
+                    platform: None,
+                }),
+                recreation.config,
+            )
+            .await
+        {
+            Ok(created) => created,
+            Err(error) => {
+                return self
+                    .rollback_after_failure(
+                        &name,
+                        &backup_name,
+                        &mut transaction,
+                        journal,
+                        format!("container creation failed: {error}"),
+                    )
+                    .await;
+            }
+        };
+        transition(
+            &mut transaction,
+            TransactionState::ReplacementStarted,
+            journal,
+        )?;
+        if let Err(error) = self
+            .client
+            .start_container::<String>(&created.id, None::<StartContainerOptions<String>>)
+            .await
+        {
+            return self
+                .rollback_after_failure(
+                    &name,
+                    &backup_name,
+                    &mut transaction,
+                    journal,
+                    format!("replacement start failed: {error}"),
+                )
+                .await;
+        }
+        transition(&mut transaction, TransactionState::HealthChecking, journal)?;
+        if let Err(error) = self
+            .wait_for_health(&name, options.health_timeout, options.health_policy)
+            .await
+        {
+            return self
+                .rollback_after_failure(&name, &backup_name, &mut transaction, journal, error)
+                .await;
+        }
+        self.client
+            .remove_container(
+                &backup_name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    link: false,
+                    v: false,
+                }),
+            )
+            .await?;
+        if options.cleanup_old_image {
+            if let Err(error) = self
+                .client
+                .remove_image(
+                    &old_image_id,
+                    Some(RemoveImageOptions {
+                        force: false,
+                        noprune: true,
+                    }),
+                    None,
+                )
+                .await
+            {
+                tracing::warn!(image = %old_image_id, %error, "old image retention cleanup skipped");
+            }
+        }
+        transition(&mut transaction, TransactionState::Committed, journal)?;
+        Ok(UpdateResult {
+            container_name: name,
+            state: transaction.record().state.clone(),
+            target_image_id,
+        })
+    }
+
+    async fn wait_for_health(
+        &self,
+        container: &str,
+        timeout: u64,
+        policy: HealthPolicy,
+    ) -> Result<(), String> {
+        let started = tokio::time::Instant::now();
+        loop {
+            let inspect = self
+                .client
+                .inspect_container(container, None)
+                .await
+                .map_err(|error| error.to_string())?;
+            let value = serde_json::to_value(inspect).map_err(|error| error.to_string())?;
+            let state = value
+                .pointer("/State/Status")
+                .and_then(|status| status.as_str())
+                .unwrap_or("missing");
+            let health = value
+                .pointer("/State/Health/Status")
+                .and_then(|status| status.as_str());
+            let status = match (state, health) {
+                ("running", Some("healthy")) => HealthStatus::Healthy,
+                ("running", Some("starting")) => HealthStatus::Starting,
+                ("running", Some("unhealthy")) => HealthStatus::Unhealthy,
+                ("running", None) => HealthStatus::Running,
+                ("exited", _) | ("dead", _) => HealthStatus::Exited,
+                _ => HealthStatus::Missing,
+            };
+            let restart_count = value
+                .pointer("/RestartCount")
+                .and_then(|count| count.as_u64())
+                .unwrap_or(0);
+            let has_healthcheck = value
+                .pointer("/Config/Healthcheck")
+                .is_some_and(|health| !health.is_null());
+            if health_is_acceptable(
+                status,
+                has_healthcheck,
+                restart_count,
+                started.elapsed().as_secs(),
+                policy,
+            ) {
+                return Ok(());
+            }
+            if started.elapsed().as_secs() >= timeout
+                || matches!(
+                    status,
+                    HealthStatus::Unhealthy | HealthStatus::Exited | HealthStatus::Missing
+                )
+            {
+                return Err(format!("health check failed with state '{state}'"));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+
+    async fn rollback_after_failure(
+        &self,
+        name: &str,
+        backup_name: &str,
+        transaction: &mut Transaction,
+        journal: &StateJournal,
+        reason: String,
+    ) -> Result<UpdateResult, DockerError> {
+        transition(transaction, TransactionState::RollingBack, journal)?;
+        let _ = self
+            .client
+            .remove_container(
+                name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    link: false,
+                    v: false,
+                }),
+            )
+            .await;
+        if let Err(error) = self
+            .client
+            .rename_container(backup_name, RenameContainerOptions { name })
+            .await
+        {
+            transition(transaction, TransactionState::RollbackFailed, journal)?;
+            return Err(DockerError::RollbackFailed(format!(
+                "{reason}; rename failed: {error}"
+            )));
+        }
+        if let Err(error) = self
+            .client
+            .start_container::<String>(name, None::<StartContainerOptions<String>>)
+            .await
+        {
+            transition(transaction, TransactionState::RollbackFailed, journal)?;
+            return Err(DockerError::RollbackFailed(format!(
+                "{reason}; restore start failed: {error}"
+            )));
+        }
+        let restored = self.client.inspect_container(name, None).await?;
+        let restored_value = serde_json::to_value(restored)?;
+        if restored_value
+            .pointer("/State/Running")
+            .and_then(|running| running.as_bool())
+            != Some(true)
+        {
+            transition(transaction, TransactionState::RollbackFailed, journal)?;
+            return Err(DockerError::RollbackFailed(format!(
+                "{reason}; restored container is not running"
+            )));
+        }
+        transition(transaction, TransactionState::RolledBack, journal)?;
+        Err(DockerError::UpdateFailed(format!(
+            "{reason}; rollback verified"
+        )))
+    }
+}
+
+fn transition(
+    transaction: &mut Transaction,
+    state: TransactionState,
+    journal: &StateJournal,
+) -> Result<(), DockerError> {
+    transaction.transition(state)?;
+    journal.append(transaction.record())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -191,5 +638,17 @@ mod tests {
             ..Default::default()
         };
         assert!(ContainerSnapshot::from_summary(summary).is_none());
+    }
+
+    #[test]
+    fn similarly_named_container_is_not_mistaken_for_systower() {
+        let summary = ContainerSummary {
+            id: Some("abc123".into()),
+            names: Some(vec!["/systower-v2-test".into()]),
+            image: Some("alpine:3.20".into()),
+            ..Default::default()
+        };
+        let snapshot = ContainerSnapshot::from_summary(summary).unwrap();
+        assert!(!snapshot.facts().is_self);
     }
 }

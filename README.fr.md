@@ -19,6 +19,8 @@
 
 ---
 
+> **Systower 2.0.0 :** l’implémentation Rust est désormais l’implémentation officielle. L’ancienne implémentation Bash a été supprimée.
+
 ## ✨ Fonctionnalités
 
 - 🐳 **Mises à jour automatiques des conteneurs Docker** — Télécharge les dernières images et recrée automatiquement les conteneurs en préservant 100% de leur configuration (volumes, ports, réseaux, labels, variables d'environnement, restart policies).
@@ -133,6 +135,10 @@ Systower intègre des protections natives pour éliminer ce problème :
 
 ## ⚙️ Référence des Variables d'Environnement
 
+### Aperçu de la CLI V2
+
+La version Rust prend actuellement en charge `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NOM --image IMAGE` et `systower run`. Utilisez `--no-pull` uniquement pour une image déjà présente localement. Les conteneurs Compose sont refusés si leur projet source ne peut pas être résolu sans approximation.
+
 | Variable | Défaut | Description |
 |:---|:---|:---|
 | `SYSTOWER_CRON` | `0 4 * * *` | Expression cron pour les vérifications |
@@ -157,6 +163,8 @@ Systower intègre des protections natives pour éliminer ce problème :
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Activer la mise à jour des paquets de la machine hôte |
 | `SYSTOWER_SYSTEM_REBOOT` | `false` | Redémarrage automatique si requis par les paquets |
 | `SYSTOWER_NOTIFY_ENABLED` | `false` | Activer le système de notifications |
+| `SYSTOWER_STATE_FILE` | `./systower-state.jsonl` | Journal transactionnel persistant de V2 |
+| `SYSTOWER_DOCKER_ALLOW_NO_HEALTHCHECK` | `false` | Autoriser explicitement un conteneur stable sans healthcheck Docker |
 
 ---
 

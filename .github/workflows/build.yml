@@ -1,8 +1,8 @@
 # ============================================================================
-# Systower — Build & Push Docker Image to GHCR
+# Systower 2.0.0 — Build & Push Rust Docker Image to GHCR
 # ============================================================================
 # Triggered on push to main branch and version tags.
-# Builds multi-arch image (amd64, arm64, arm/v7, arm/v6) and pushes to GitHub Container Registry.
+# Builds multi-arch image (amd64, arm64, arm/v7) and pushes to GitHub Container Registry.
 # ============================================================================
 
 name: Build & Push Docker Image
@@ -52,7 +52,7 @@ jobs:
           tags: |
             # Tag with "latest" on main branch
             type=raw,value=latest,enable={{is_default_branch}}
-            # Tag with version on version tags (v1.0.0 → 1.0.0)
+            # Tag with version on version tags (v2.0.0 -> 2.0.0)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -65,7 +65,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
