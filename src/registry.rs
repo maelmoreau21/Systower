@@ -54,8 +54,14 @@ fn parse_credentials(
             return Ok(Some(auth));
         }
     }
-    if file.creds_store.as_deref().is_some_and(|value| !value.is_empty())
-        || file.cred_helpers.keys().any(|key| normalize_registry_host(key) == host)
+    if file
+        .creds_store
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+        || file
+            .cred_helpers
+            .keys()
+            .any(|key| normalize_registry_host(key) == host)
     {
         return Err(RegistryError::ExternalHelper(host));
     }
