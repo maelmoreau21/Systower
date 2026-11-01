@@ -14,6 +14,7 @@ use thiserror::Error;
 pub enum TransactionState {
     Planned,
     ImagePulled,
+    OriginalStopping,
     BackupCreated,
     ReplacementStarted,
     HealthChecking,
@@ -102,6 +103,10 @@ fn valid_transition(from: &TransactionState, to: &TransactionState) -> bool {
         (TransactionState::Planned, TransactionState::ImagePulled)
             | (
                 TransactionState::ImagePulled,
+                TransactionState::OriginalStopping
+            )
+            | (
+                TransactionState::OriginalStopping,
                 TransactionState::BackupCreated
             )
             | (
@@ -117,6 +122,7 @@ fn valid_transition(from: &TransactionState, to: &TransactionState) -> bool {
                 TransactionState::Committed
             )
             | (TransactionState::ImagePulled, TransactionState::RollingBack)
+            | (TransactionState::OriginalStopping, TransactionState::RollingBack)
             | (
                 TransactionState::BackupCreated,
                 TransactionState::RollingBack
@@ -398,6 +404,7 @@ mod tests {
         let mut transaction = Transaction::new("tx-3".into(), "abc".into(), "example:v2".into());
         for state in [
             TransactionState::ImagePulled,
+            TransactionState::OriginalStopping,
             TransactionState::BackupCreated,
             TransactionState::ReplacementStarted,
             TransactionState::HealthChecking,
