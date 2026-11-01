@@ -2,11 +2,7 @@
 //! Compose remains the source of truth; never reconstruct a Compose service
 //! from Docker Engine inspect output.
 
-use std::{
-    ffi::OsString,
-    path::PathBuf,
-    process::Command,
-};
+use std::{ffi::OsString, path::PathBuf, process::Command};
 
 use thiserror::Error;
 
@@ -153,7 +149,9 @@ pub fn execute(plan: &ComposePlan, apply: bool) -> Result<(), ComposeError> {
 
 fn valid_service_name(name: &str) -> bool {
     let mut chars = name.chars();
-    chars.next().is_some_and(|first| first.is_ascii_alphanumeric())
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphanumeric())
         && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
 }
 
@@ -197,8 +195,8 @@ mod tests {
     #[test]
     fn invalid_service_names_cannot_become_command_options() {
         let (file, _) = sample();
-        let error = ComposePlan::new(vec![file.clone()], None, vec!["--profile".into()])
-            .unwrap_err();
+        let error =
+            ComposePlan::new(vec![file.clone()], None, vec!["--profile".into()]).unwrap_err();
         assert!(matches!(error, ComposeError::InvalidService(_)));
         std::fs::remove_file(file).unwrap();
     }
