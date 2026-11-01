@@ -5,6 +5,7 @@ pub mod docker;
 pub mod host;
 pub mod notify;
 pub mod policy;
+pub mod registry;
 pub mod scheduler;
 pub mod state;
 pub mod update;
