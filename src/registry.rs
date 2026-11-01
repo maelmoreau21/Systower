@@ -71,7 +71,9 @@ fn parse_credentials(
 /// Docker Hub is implied unless the first path component is a registry host.
 fn registry_host(image: &str) -> String {
     let first = image.split('/').next().unwrap_or_default();
-    if image.contains('/') && (first.contains('.') || first.contains(':') || first == "localhost") {
+    if image.contains('/')
+        && (first.contains('.') || first.contains(':') || first == "localhost")
+    {
         normalize_registry_host(first)
     } else {
         "docker.io".into()
@@ -129,7 +131,10 @@ mod tests {
 
     #[test]
     fn registry_host_with_port_requires_slash_before_image_name() {
-        assert_eq!(registry_host("registry.local:5000/team/api:v2"), "registry.local:5000");
+        assert_eq!(
+            registry_host("registry.local:5000/team/api:v2"),
+            "registry.local:5000"
+        );
         assert_eq!(registry_host("nginx:alpine"), "docker.io");
     }
 
