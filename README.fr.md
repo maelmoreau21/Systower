@@ -19,15 +19,15 @@
 
 ---
 
-> **Systower 2.0.0 :** l’implémentation Rust est désormais l’implémentation officielle. L’ancienne implémentation Bash a été supprimée.
+> **Systower 2.0.0 :** l'implémentation Rust est officielle. **Limitation de sécurité :** seules les mises à jour des conteneurs Docker standalone éligibles sont prises en charge. Les conteneurs Compose et les services protégés sont ignorés. Le rollback d'un conteneur ne restaure pas les données ni les migrations de bases de données. Commencez en mode surveillance.
 
 ## ✨ Fonctionnalités
 
-- 🐳 **Mises à jour automatiques des conteneurs Docker** — Télécharge les dernières images et recrée automatiquement les conteneurs en préservant 100% de leur configuration (volumes, ports, réseaux, labels, variables d'environnement, restart policies).
+- 🐳 **Mises à jour des conteneurs Docker standalone** — Télécharge les images et recrée les conteneurs éligibles à partir de leur configuration inspectée, après vérification des volumes et de la politique de sécurité.
 - 🖥️ **Mise à jour du système hôte** — Met à jour directement le système d'exploitation de la machine locale (Debian, Ubuntu, Raspberry Pi OS, Alpine, Arch, Fedora) sans aucune configuration SSH.
 - 🚫 **Exclusion facile de conteneurs** — Excluez les conteneurs que vous ne souhaitez pas mettre à jour via variable d'environnement ou via label Docker.
 - 🔔 **Notifications Multi-Canaux** — Alertes immédiates sur **Discord**, **Slack**, **Telegram** et **Webhooks JSON**.
-- 🔄 **Rollback Automatique** — En cas de problème au démarrage d'une nouvelle image, Systower restaure instantanément l'ancienne version.
+- 🔄 **Rollback de conteneur** — En cas d'échec, Systower tente de restaurer l'ancien conteneur. Cela ne restaure pas les données ni les migrations applicatives.
 - 🧹 **Nettoyage Automatique** — Suppression des anciennes images inutilisées après une mise à jour réussie.
 - 🪶 **Ultra-Léger & Économe** — Image de **~25 Mo**, consommation de **< 2 Mo de RAM**, compatible avec `amd64` et `arm64`.
 
@@ -137,7 +137,7 @@ Systower intègre des protections natives pour éliminer ce problème :
 
 ### Aperçu de la CLI V2
 
-La version Rust prend actuellement en charge `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NOM --image IMAGE` et `systower run`. Utilisez `--no-pull` uniquement pour une image déjà présente localement. Les conteneurs Compose sont ignorés, car la configuration Docker inspectée n’est pas équivalente à `docker compose up -d`.
+La version Rust prend actuellement en charge `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NOM --image IMAGE` et `systower run`. Utilisez `--no-pull` uniquement pour une image déjà présente localement. Les conteneurs Compose sont strictement ignorés, y compris en mise à jour manuelle, car la configuration Docker inspectée n'est pas équivalente à `docker compose up -d`.
 
 | Variable | Défaut | Description |
 |:---|:---|:---|
@@ -156,8 +156,8 @@ La version Rust prend actuellement en charge `systower check`, `systower docker 
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Délai d'arrêt avant forçage (secondes) |
 | `SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT` | `60` | Délai d'attente du healthcheck après recréation (secondes) |
 | `SYSTOWER_UPDATE_SELF` | `false` | Détecter Systower lui-même, mais ignorer son remplacement jusqu’à la mise en place d’un transfert supervisé sûr |
-| `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protéger et ignorer les conteneurs VPN, DNS et host mode |
-| `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protéger les conteneurs montant `docker.sock` (Portainer, etc.) |
+| `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `true` | Protéger et ignorer les conteneurs VPN, DNS et host mode |
+| `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `true` | Protéger les conteneurs montant `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Délai de pause (secondes) entre chaque mise à jour |
 | `SYSTOWER_RPI_NETWORK_IMMUNITY` | `false` | Sur Raspberry Pi uniquement, immuniser le réseau hôte |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Activer la mise à jour des paquets de la machine hôte |
