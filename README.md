@@ -19,15 +19,15 @@
 
 ---
 
-> **Systower 2.0.0:** the Rust implementation is the current and supported implementation. The former Bash implementation has been removed.
+> **Systower 2.0.0:** the Rust implementation is current. **Safety scope:** automated replacement currently supports eligible standalone Docker containers only; Docker Compose services and unsupported/protected containers are intentionally skipped. This is not a data backup system. Use monitor-only mode before enabling production updates.
 
 ## ✨ Features
 
-- 🐳 **Docker Container Updates** — Pull latest images and recreate containers preserving full configuration (networks, volumes, ports, caps, devices, env, restart policies).
+- 🐳 **Standalone Docker Container Updates** — Pull images and recreate eligible standalone containers using the inspected configuration. Containers with unverified volume reuse, or unsupported orchestrators, are skipped.
 - 🖥️ **Local Host System Updates** — Update the host OS directly (Debian, Ubuntu, Raspberry Pi OS, Alpine, Arch, Fedora) with zero SSH configuration needed.
 - 🚫 **Flexible Container Exclusion** — Exclude specific containers via environment variable or Docker label.
 - 🔔 **Multi-Channel Notifications** — Instant alerts to **Discord**, **Slack**, **Telegram**, and **custom JSON webhooks** on updates, errors, or rollbacks.
-- 🔄 **Automatic Rollback** — If a newly updated container fails to start, Systower automatically reverts to the backup container instantaneously.
+- 🔄 **Container Rollback** — Attempts to restore the previous container when replacement or health validation fails. This does not roll back database/schema migrations or guarantee application data restoration.
 - 🧹 **Auto Cleanup** — Remove orphaned and dangling images after successful updates.
 - 🪶 **Ultra-Lightweight Multi-Arch** — Alpine Linux base (~25MB image, < 2MB RAM), supporting `amd64` and `arm64`.
 
@@ -137,7 +137,7 @@ Systower includes built-in safeguards:
 
 ### V2 CLI preview
 
-The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are recreated directly through Docker while preserving their inspected configuration and Compose labels.
+The Rust implementation currently supports `systower check`, `systower docker check`, `systower docker pull --image IMAGE`, `systower docker update --container NAME --image IMAGE`, and `systower run`. Use `--no-pull` only for images already present locally. Compose-managed containers are excluded until a native Compose update agent is implemented; reconstructing them via the Engine API is not an exact Compose round trip.
 
 | Environment Variable | Default | Description |
 |:---|:---|:---|
@@ -156,8 +156,8 @@ The Rust implementation currently supports `systower check`, `systower docker ch
 | `SYSTOWER_DOCKER_STOP_TIMEOUT` | `30` | Seconds to wait before SIGKILL |
 | `SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT` | `60` | Post-recreation healthcheck timeout in seconds |
 | `SYSTOWER_UPDATE_SELF` | `false` | Detect Systower itself, but skip replacement until a supervised handoff can stop the running daemon safely |
-| `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `false` | Protect and skip VPN, DNS, and host-mode network containers |
-| `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `false` | Protect containers mounting `docker.sock` (Portainer, etc.) |
+| `SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS` | `true` | Protect and skip VPN, DNS, and host-mode network containers |
+| `SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS` | `true` | Protect containers mounting `docker.sock` (Portainer, etc.) |
 | `SYSTOWER_DOCKER_UPDATE_DELAY` | `2` | Cooldown pause (seconds) between container updates |
 | `SYSTOWER_RPI_NETWORK_IMMUNITY` | `false` | On Raspberry Pi only, immunize host networking |
 | `SYSTOWER_SYSTEM_ENABLED` | `false` | Enable local host OS updates (requires `pid: host` and `privileged: true`) |
