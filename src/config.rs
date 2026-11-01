@@ -13,7 +13,9 @@ pub enum ConfigError {
     Integer { variable: String, value: String },
     #[error("SYSTOWER_CRON must contain five fields")]
     InvalidCron,
-    #[error("SYSTOWER_COMPOSE_TARGETS_JSON must be a valid nonempty JSON list of explicit targets: {0}")]
+    #[error(
+        "SYSTOWER_COMPOSE_TARGETS_JSON must be a valid nonempty JSON list of explicit targets: {0}"
+    )]
     InvalidComposeTargets(String),
     #[error("SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT must be greater than zero")]
     HealthcheckTimeout,
@@ -118,11 +120,13 @@ impl Config {
         }
         if self.compose_enabled {
             let targets = self.compose_targets()?;
-            if targets.is_empty() || targets.iter().any(|target| {
-                target.files.is_empty() || target.services.is_empty()
-            }) {
+            if targets.is_empty()
+                || targets
+                    .iter()
+                    .any(|target| target.files.is_empty() || target.services.is_empty())
+            {
                 return Err(ConfigError::InvalidComposeTargets(
-                    "at least one target with nonempty files and services is required".into()
+                    "at least one target with nonempty files and services is required".into(),
                 ));
             }
         }
@@ -201,7 +205,10 @@ mod tests {
             compose_targets_json: "[]".into(),
             ..Config::from_env().unwrap()
         };
-        assert!(matches!(config.validate(), Err(ConfigError::InvalidComposeTargets(_))));
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidComposeTargets(_))
+        ));
     }
 
     #[test]
@@ -211,14 +218,18 @@ mod tests {
             compose_targets_json: "{invalid".into(),
             ..Config::from_env().unwrap()
         };
-        assert!(matches!(config.validate(), Err(ConfigError::InvalidComposeTargets(_))));
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidComposeTargets(_))
+        ));
     }
 
     #[test]
     fn compose_automation_accepts_explicit_services() {
         let config = Config {
             compose_enabled: true,
-            compose_targets_json: r#"[{"files":["/tmp/my-compose.yml"],"services":["web"]}]"#.into(),
+            compose_targets_json: r#"[{"files":["/tmp/my-compose.yml"],"services":["web"]}]"#
+                .into(),
             ..Config::from_env().unwrap()
         };
         assert!(config.validate().is_ok());
