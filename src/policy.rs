@@ -20,10 +20,18 @@ pub struct ContainerFacts {
 
 impl ContainerPolicy {
     pub fn allows(&self, facts: &ContainerFacts) -> bool {
-        if facts.is_self || facts.excluded_by_label || facts.name.ends_with("_systower_bak") {
+        if facts.is_self
+            || facts.excluded_by_label
+            || facts.compose_managed
+            || facts.name.ends_with("_systower_bak")
+        {
             return false;
         }
-        if self.protect_socket && facts.mounts_docker_socket && self.include_only.is_empty() {
+        // A selection list cannot override a safety exclusion.
+        if contains(&self.exclude, &facts.name) {
+            return false;
+        }
+        if self.protect_socket && facts.mounts_docker_socket {
             return false;
         }
         let protected_network = facts.network_sensitive
@@ -31,13 +39,13 @@ impl ContainerPolicy {
             || facts.network_mode.starts_with("container:")
             || contains(&facts.capabilities, "NET_ADMIN")
             || contains(&facts.capabilities, "NET_RAW");
-        if self.protect_network && protected_network && !contains(&self.include_only, &facts.name) {
+        if self.protect_network && protected_network {
             return false;
         }
         if !self.include_only.is_empty() {
             return contains(&self.include_only, &facts.name);
         }
-        !contains(&self.exclude, &facts.name)
+        true
     }
 }
 
@@ -59,13 +67,13 @@ mod tests {
     }
 
     #[test]
-    fn include_only_has_priority_over_exclude() {
+    fn exclude_has_priority_over_include_only() {
         let policy = ContainerPolicy {
             include_only: vec!["api".into()],
             exclude: vec!["api".into()],
             ..Default::default()
         };
-        assert!(policy.allows(&facts("API")));
+        assert!(!policy.allows(&facts("API")));
         assert!(!policy.allows(&facts("web")));
     }
 
@@ -82,24 +90,49 @@ mod tests {
     }
 
     #[test]
-    fn compose_managed_containers_are_allowed_when_otherwise_safe() {
+    fn compose_managed_containers_are_blocked_until_native_support_exists() {
         let policy = ContainerPolicy::default();
-        assert!(policy.allows(&ContainerFacts {
+        assert!(!policy.allows(&ContainerFacts {
             compose_managed: true,
             ..facts("api")
         }));
     }
 
     #[test]
-    fn explicit_include_overrides_network_protection() {
+    fn explicit_include_does_not_override_network_protection() {
         let policy = ContainerPolicy {
             protect_network: true,
             include_only: vec!["vpn".into()],
             ..Default::default()
         };
-        assert!(policy.allows(&ContainerFacts {
+        assert!(!policy.allows(&ContainerFacts {
             network_sensitive: true,
             ..facts("vpn")
+        }));
+    }
+
+    #[test]
+    fn explicit_include_does_not_override_socket_protection() {
+        let policy = ContainerPolicy {
+            protect_socket: true,
+            include_only: vec!["portainer".into()],
+            ..Default::default()
+        };
+        assert!(!policy.allows(&ContainerFacts {
+            mounts_docker_socket: true,
+            ..facts("portainer")
+        }));
+    }
+
+    #[test]
+    fn excluded_label_always_wins() {
+        let policy = ContainerPolicy {
+            include_only: vec!["api".into()],
+            ..Default::default()
+        };
+        assert!(!policy.allows(&ContainerFacts {
+            excluded_by_label: true,
+            ..facts("api")
         }));
     }
 }
