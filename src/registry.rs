@@ -71,9 +71,7 @@ fn parse_credentials(
 /// Docker Hub is implied unless the first path component is a registry host.
 fn registry_host(image: &str) -> String {
     let first = image.split('/').next().unwrap_or_default();
-    if image.contains('/')
-        && (first.contains('.') || first.contains(':') || first == "localhost")
-    {
+    if image.contains('/') && (first.contains('.') || first.contains(':') || first == "localhost") {
         normalize_registry_host(first)
     } else {
         "docker.io".into()
