@@ -3,7 +3,7 @@ use std::{env, time::Duration};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::policy::ContainerPolicy;
+use crate::{compose::ComposeTarget, policy::ContainerPolicy};
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -13,6 +13,8 @@ pub enum ConfigError {
     Integer { variable: String, value: String },
     #[error("SYSTOWER_CRON must contain five fields")]
     InvalidCron,
+    #[error("SYSTOWER_COMPOSE_TARGETS_JSON must be a valid nonempty JSON list of explicit targets: {0}")]
+    InvalidComposeTargets(String),
     #[error("SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT must be greater than zero")]
     HealthcheckTimeout,
 }
@@ -22,6 +24,8 @@ pub struct Config {
     pub cron: String,
     pub run_on_start: bool,
     pub docker_enabled: bool,
+    pub compose_enabled: bool,
+    pub compose_targets_json: String,
     pub docker_cleanup: bool,
     pub docker_prune: String,
     pub docker_prune_all: bool,
@@ -58,6 +62,8 @@ impl Config {
             cron: value("SYSTOWER_CRON", "0 4 * * *"),
             run_on_start: boolean("SYSTOWER_RUN_ON_START", true)?,
             docker_enabled: boolean("SYSTOWER_DOCKER_ENABLED", true)?,
+            compose_enabled: boolean("SYSTOWER_COMPOSE_ENABLED", false)?,
+            compose_targets_json: value("SYSTOWER_COMPOSE_TARGETS_JSON", "[]"),
             docker_cleanup: boolean("SYSTOWER_DOCKER_CLEANUP", true)?,
             docker_prune: value("SYSTOWER_DOCKER_PRUNE", "false"),
             docker_prune_all: boolean("SYSTOWER_DOCKER_PRUNE_ALL", false)?,
@@ -110,11 +116,26 @@ impl Config {
         if crate::scheduler::delay_until_next(&self.cron).is_err() {
             return Err(ConfigError::InvalidCron);
         }
+        if self.compose_enabled {
+            let targets = self.compose_targets()?;
+            if targets.is_empty() || targets.iter().any(|target| {
+                target.files.is_empty() || target.services.is_empty()
+            }) {
+                return Err(ConfigError::InvalidComposeTargets(
+                    "at least one target with nonempty files and services is required".into()
+                ));
+            }
+        }
         if self.docker_healthcheck_timeout == 0 {
             return Err(ConfigError::HealthcheckTimeout);
         }
         let _ = Duration::from_secs(self.docker_stop_timeout);
         Ok(())
+    }
+
+    pub fn compose_targets(&self) -> Result<Vec<ComposeTarget>, ConfigError> {
+        serde_json::from_str(&self.compose_targets_json)
+            .map_err(|error| ConfigError::InvalidComposeTargets(error.to_string()))
     }
 
     pub fn policy(&self) -> ContainerPolicy {
@@ -171,6 +192,36 @@ mod tests {
         assert!(config.docker_enabled);
         assert!(config.run_on_start);
         assert!(!config.system_enabled);
+    }
+
+    #[test]
+    fn compose_automation_requires_explicit_targets() {
+        let config = Config {
+            compose_enabled: true,
+            compose_targets_json: "[]".into(),
+            ..Config::from_env().unwrap()
+        };
+        assert!(matches!(config.validate(), Err(ConfigError::InvalidComposeTargets(_))));
+    }
+
+    #[test]
+    fn compose_automation_rejects_invalid_json() {
+        let config = Config {
+            compose_enabled: true,
+            compose_targets_json: "{invalid".into(),
+            ..Config::from_env().unwrap()
+        };
+        assert!(matches!(config.validate(), Err(ConfigError::InvalidComposeTargets(_))));
+    }
+
+    #[test]
+    fn compose_automation_accepts_explicit_services() {
+        let config = Config {
+            compose_enabled: true,
+            compose_targets_json: r#"[{"files":["/tmp/my-compose.yml"],"services":["web"]}]"#.into(),
+            ..Config::from_env().unwrap()
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]
