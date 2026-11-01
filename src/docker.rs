@@ -61,10 +61,12 @@ pub struct UpdateResult {
     pub container_name: String,
     pub state: TransactionState,
     pub target_image_id: String,
+    pub changed: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct UpdateOptions {
+    pub policy: ContainerPolicy,
     pub health_policy: HealthPolicy,
     pub stop_timeout: u64,
     pub health_timeout: u64,
@@ -462,6 +464,35 @@ impl DockerEngine {
         if name.is_empty() {
             return Err(DockerError::UpdateFailed("container has no name".into()));
         }
+        // Even direct CLI updates must obey the exact daemon safety policy.
+        let mut snapshot = ContainerSnapshot {
+            id: container_id.to_owned(),
+            name: name.clone(),
+            image: value.pointer("/Config/Image")
+                .and_then(|image| image.as_str())
+                .unwrap_or_default().to_owned(),
+            image_id: String::new(),
+            labels: HashMap::new(),
+            state: String::new(),
+            status: String::new(),
+            mounts_docker_socket: false,
+            network_mode: String::new(),
+            capabilities: Vec::new(),
+        };
+        snapshot.apply_inspect(&inspect)?;
+        if !options.policy.allows(&snapshot.facts()) {
+            return Err(DockerError::UpdateFailed(format!(
+                "container '{name}' is excluded or unsupported by the safe standalone updater"
+            )));
+        }
+        if !value.pointer("/State/Running")
+            .and_then(|running| running.as_bool()).unwrap_or(false)
+        {
+            return Err(DockerError::UpdateFailed(
+                "stopped containers cannot be updated".into()
+            ));
+        }
+        ensure_volume_mounts_are_reused(&value)?;
         if value
             .pointer("/HostConfig/AutoRemove")
             .and_then(|value| value.as_bool())
@@ -486,7 +517,15 @@ impl DockerEngine {
                 container_name: name,
                 state: TransactionState::Committed,
                 target_image_id,
+                changed: false,
             });
+        }
+
+        // Refuse a guaranteed health failure before stopping the original.
+        if !options.health_policy.allow_no_healthcheck && !has_effective_healthcheck(&value) {
+            return Err(DockerError::UpdateFailed(format!(
+                "container '{name}' has no usable Docker healthcheck; refusing to stop it"
+            )));
         }
 
         let transaction_id = format!(
@@ -633,6 +672,7 @@ impl DockerEngine {
             container_name: name,
             state: transaction.record().state.clone(),
             target_image_id,
+            changed: true,
         })
     }
 
@@ -755,6 +795,52 @@ impl DockerEngine {
     }
 }
 
+// Reject implicit/anonymous volume recreation when the original volume
+// cannot be proven to be explicitly reused by the inspected configuration.
+fn ensure_volume_mounts_are_reused(inspect: &serde_json::Value) -> Result<(), DockerError> {
+    let Some(mounts) = inspect.get("Mounts").and_then(|mounts| mounts.as_array()) else {
+        return Ok(());
+    };
+    for mount in mounts {
+        if mount.get("Type").and_then(|value| value.as_str()) != Some("volume") {
+            continue;
+        }
+        let name = mount.get("Name").and_then(|value| value.as_str()).unwrap_or("");
+        let destination = mount.get("Destination")
+            .and_then(|value| value.as_str()).unwrap_or("");
+        let bind_match = inspect.pointer("/HostConfig/Binds")
+            .and_then(|binds| binds.as_array()).is_some_and(|binds| {
+                binds.iter().filter_map(|value| value.as_str()).any(|bind| {
+                    let mut parts = bind.splitn(3, ':');
+                    parts.next() == Some(name) && parts.next() == Some(destination)
+                })
+            });
+        let mount_match = inspect.pointer("/HostConfig/Mounts")
+            .and_then(|mounts| mounts.as_array()).is_some_and(|mounts| {
+                mounts.iter().any(|configured| {
+                    configured.get("Type").and_then(|value| value.as_str()) == Some("volume")
+                        && configured.get("Source").and_then(|value| value.as_str()) == Some(name)
+                        && configured.get("Target").and_then(|value| value.as_str())
+                            == Some(destination)
+                })
+            });
+        if name.is_empty() || destination.is_empty() || !(bind_match || mount_match) {
+            return Err(DockerError::UpdateFailed(format!(
+                "volume at '{destination}' cannot be proven reusable; update refused to protect data"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn has_effective_healthcheck(inspect: &serde_json::Value) -> bool {
+    inspect.pointer("/Config/Healthcheck/Test")
+        .and_then(|test| test.as_array())
+        .and_then(|test| test.first())
+        .and_then(|cmd| cmd.as_str())
+        .is_some_and(|cmd| cmd != "NONE")
+}
+
 fn transition(
     transaction: &mut Transaction,
     state: TransactionState,
@@ -836,5 +922,34 @@ mod tests {
         assert!(endpoint.get("IPAddress").is_none());
         assert!(endpoint.get("NetworkID").is_none());
         assert!(endpoint.get("EndpointID").is_none());
+    }
+
+    #[test]
+    fn rejects_anonymous_volumes_without_explicit_reuse() {
+        let inspect = serde_json::json!({
+            "Mounts": [{"Type": "volume", "Name": "generated-id", "Destination": "/data"}],
+            "HostConfig": {"Binds": [], "Mounts": []}
+        });
+        assert!(ensure_volume_mounts_are_reused(&inspect).is_err());
+    }
+
+    #[test]
+    fn accepts_explicit_named_volume_binding() {
+        let inspect = serde_json::json!({
+            "Mounts": [{"Type": "volume", "Name": "data", "Destination": "/data"}],
+            "HostConfig": {"Binds": ["data:/data:rw"]}
+        });
+        assert!(ensure_volume_mounts_are_reused(&inspect).is_ok());
+    }
+
+    #[test]
+    fn preflight_requires_effective_healthcheck() {
+        assert!(!has_effective_healthcheck(&serde_json::json!({"Config": {}})));
+        assert!(!has_effective_healthcheck(&serde_json::json!({
+            "Config": {"Healthcheck": {"Test": ["NONE"]}}
+        })));
+        assert!(has_effective_healthcheck(&serde_json::json!({
+            "Config": {"Healthcheck": {"Test": ["CMD", "true"]}}
+        })));
     }
 }
