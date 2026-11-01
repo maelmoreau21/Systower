@@ -2,8 +2,8 @@ use clap::Parser;
 use systower::cli::{ComposeCommand, ConfigCommand, DockerCommand, SystemCommand};
 use systower::{
     cli::{Cli, Command},
-    config::Config,
     compose::ComposePlan,
+    config::Config,
     daemon,
     docker::{DockerEngine, UpdateOptions},
     host,
