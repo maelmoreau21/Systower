@@ -287,9 +287,10 @@ impl DockerEngine {
                     && current_name.as_deref() == Some(original_name.as_str())
                 {
                     transition(&mut transaction, TransactionState::RollingBack, journal)?;
-                    if let Err(error) = self.restart_original_if_needed(
-                        &original_name, rollback_health_timeout
-                    ).await {
+                    if let Err(error) = self
+                        .restart_original_if_needed(&original_name, rollback_health_timeout)
+                        .await
+                    {
                         transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
                         return Err(error);
                     }
@@ -481,9 +482,11 @@ impl DockerEngine {
         let mut snapshot = ContainerSnapshot {
             id: container_id.to_owned(),
             name: name.clone(),
-            image: value.pointer("/Config/Image")
+            image: value
+                .pointer("/Config/Image")
                 .and_then(|image| image.as_str())
-                .unwrap_or_default().to_owned(),
+                .unwrap_or_default()
+                .to_owned(),
             image_id: String::new(),
             labels: HashMap::new(),
             state: String::new(),
@@ -498,11 +501,13 @@ impl DockerEngine {
                 "container '{name}' is excluded or unsupported by the safe standalone updater"
             )));
         }
-        if !value.pointer("/State/Running")
-            .and_then(|running| running.as_bool()).unwrap_or(false)
+        if !value
+            .pointer("/State/Running")
+            .and_then(|running| running.as_bool())
+            .unwrap_or(false)
         {
             return Err(DockerError::UpdateFailed(
-                "stopped containers cannot be updated".into()
+                "stopped containers cannot be updated".into(),
             ));
         }
         ensure_volume_mounts_are_reused(&value)?;
@@ -568,23 +573,50 @@ impl DockerEngine {
             )));
         }
 
-        transition(&mut transaction, TransactionState::OriginalStopping, journal)?;
-        if let Err(error) = self.client.stop_container(
-            container_id,
-            Some(StopContainerOptions { t: options.stop_timeout as i64 }),
-        ).await {
-            return self.abort_before_backup(
-                &name, &mut transaction, journal, format!("stop failed: {error}"),
-                options.rollback_health_timeout,
-            ).await;
+        transition(
+            &mut transaction,
+            TransactionState::OriginalStopping,
+            journal,
+        )?;
+        if let Err(error) = self
+            .client
+            .stop_container(
+                container_id,
+                Some(StopContainerOptions {
+                    t: options.stop_timeout as i64,
+                }),
+            )
+            .await
+        {
+            return self
+                .abort_before_backup(
+                    &name,
+                    &mut transaction,
+                    journal,
+                    format!("stop failed: {error}"),
+                    options.rollback_health_timeout,
+                )
+                .await;
         }
-        if let Err(error) = self.client.rename_container(
-            container_id, RenameContainerOptions { name: backup_name.as_str() },
-        ).await {
-            return self.abort_before_backup(
-                &name, &mut transaction, journal, format!("rename failed: {error}"),
-                options.rollback_health_timeout,
-            ).await;
+        if let Err(error) = self
+            .client
+            .rename_container(
+                container_id,
+                RenameContainerOptions {
+                    name: backup_name.as_str(),
+                },
+            )
+            .await
+        {
+            return self
+                .abort_before_backup(
+                    &name,
+                    &mut transaction,
+                    journal,
+                    format!("rename failed: {error}"),
+                    options.rollback_health_timeout,
+                )
+                .await;
         }
         transition(&mut transaction, TransactionState::BackupCreated, journal)?;
 
@@ -696,16 +728,20 @@ impl DockerEngine {
             .and_then(|running| running.as_bool())
             .unwrap_or(false);
         if !running {
-            self.client.start_container::<String>(
-                container, None::<StartContainerOptions<String>>
-            ).await?;
+            self.client
+                .start_container::<String>(container, None::<StartContainerOptions<String>>)
+                .await?;
         }
         self.wait_for_health(
-            container, timeout, HealthPolicy {
+            container,
+            timeout,
+            HealthPolicy {
                 allow_no_healthcheck: true,
                 stability_seconds: 5,
             },
-        ).await.map_err(DockerError::RollbackFailed)
+        )
+        .await
+        .map_err(DockerError::RollbackFailed)
     }
 
     async fn abort_before_backup(
@@ -858,18 +894,27 @@ fn ensure_volume_mounts_are_reused(inspect: &serde_json::Value) -> Result<(), Do
         if mount.get("Type").and_then(|value| value.as_str()) != Some("volume") {
             continue;
         }
-        let name = mount.get("Name").and_then(|value| value.as_str()).unwrap_or("");
-        let destination = mount.get("Destination")
-            .and_then(|value| value.as_str()).unwrap_or("");
-        let bind_match = inspect.pointer("/HostConfig/Binds")
-            .and_then(|binds| binds.as_array()).is_some_and(|binds| {
+        let name = mount
+            .get("Name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let destination = mount
+            .get("Destination")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let bind_match = inspect
+            .pointer("/HostConfig/Binds")
+            .and_then(|binds| binds.as_array())
+            .is_some_and(|binds| {
                 binds.iter().filter_map(|value| value.as_str()).any(|bind| {
                     let mut parts = bind.splitn(3, ':');
                     parts.next() == Some(name) && parts.next() == Some(destination)
                 })
             });
-        let mount_match = inspect.pointer("/HostConfig/Mounts")
-            .and_then(|mounts| mounts.as_array()).is_some_and(|mounts| {
+        let mount_match = inspect
+            .pointer("/HostConfig/Mounts")
+            .and_then(|mounts| mounts.as_array())
+            .is_some_and(|mounts| {
                 mounts.iter().any(|configured| {
                     configured.get("Type").and_then(|value| value.as_str()) == Some("volume")
                         && configured.get("Source").and_then(|value| value.as_str()) == Some(name)
@@ -887,7 +932,8 @@ fn ensure_volume_mounts_are_reused(inspect: &serde_json::Value) -> Result<(), Do
 }
 
 fn has_effective_healthcheck(inspect: &serde_json::Value) -> bool {
-    inspect.pointer("/Config/Healthcheck/Test")
+    inspect
+        .pointer("/Config/Healthcheck/Test")
         .and_then(|test| test.as_array())
         .and_then(|test| test.first())
         .and_then(|cmd| cmd.as_str())
@@ -997,7 +1043,9 @@ mod tests {
 
     #[test]
     fn preflight_requires_effective_healthcheck() {
-        assert!(!has_effective_healthcheck(&serde_json::json!({"Config": {}})));
+        assert!(!has_effective_healthcheck(
+            &serde_json::json!({"Config": {}})
+        ));
         assert!(!has_effective_healthcheck(&serde_json::json!({
             "Config": {"Healthcheck": {"Test": ["NONE"]}}
         })));
