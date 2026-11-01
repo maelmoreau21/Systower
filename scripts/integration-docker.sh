@@ -30,8 +30,7 @@ export SYSTOWER_DOCKER_CLEANUP=false
 cat >"${TMPDIR_IT}/Dockerfile" <<'DOCKERFILE'
 FROM alpine:3.20
 ARG RELEASE_ID
-RUN if [ "$RELEASE_ID" != "broken" ]; then touch /tmp/ready; fi \\
-  && printf '%s' "$RELEASE_ID" >/release
+RUN if [ "$RELEASE_ID" != "broken" ]; then touch /tmp/ready; fi; printf '%s' "$RELEASE_ID" >/release
 HEALTHCHECK --interval=1s --timeout=2s --retries=2 CMD test -f /tmp/ready
 CMD ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done"]
 DOCKERFILE
