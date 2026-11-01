@@ -68,8 +68,8 @@ impl Notifier {
         if let Some(url) = &self.slack {
             self.client
                 .post(url)
-                .json(&MessagePayload {
-                    content: format!("{}\n{}", event.title, event.message),
+                .json(&SlackPayload {
+                    text: format!("{}\n{}", event.title, event.message),
                 })
                 .send()
                 .await?
@@ -94,6 +94,11 @@ impl Notifier {
 #[derive(Serialize)]
 struct MessagePayload {
     content: String,
+}
+
+#[derive(Serialize)]
+struct SlackPayload {
+    text: String,
 }
 
 #[derive(Serialize)]
