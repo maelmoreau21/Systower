@@ -160,11 +160,7 @@ async fn run_compose_updates(config: &Config, notifier: Option<&Notifier>) {
     };
     for target in targets {
         let service_names = target.services.join(", ");
-        let plan = match ComposePlan::new(
-            target.files,
-            target.project_directory,
-            target.services,
-        ) {
+        let plan = match ComposePlan::new(target.files, target.project_directory, target.services) {
             Ok(plan) => plan,
             Err(error) => {
                 warn!(services = %service_names, %error, "Compose target preflight failed");
@@ -183,7 +179,8 @@ async fn run_compose_updates(config: &Config, notifier: Option<&Notifier>) {
                 NotificationEvent {
                     event: "compose.checked".into(),
                     title: format!("Compose command completed: {service_names}"),
-                    message: "Compose pull/up completed; application-level health is not verified".into(),
+                    message: "Compose pull/up completed; application-level health is not verified"
+                        .into(),
                 }
             }
             Ok(Err(error)) => {
