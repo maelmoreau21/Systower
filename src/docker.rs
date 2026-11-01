@@ -34,6 +34,8 @@ pub enum DockerError {
     UpdateFailed(String),
     #[error("rollback failed: {0}")]
     RollbackFailed(String),
+    #[error("Docker registry credentials: {0}")]
+    Registry(#[from] crate::registry::RegistryError),
     #[error("state journal error: {0}")]
     State(#[from] StateError),
 }
@@ -409,7 +411,8 @@ impl DockerEngine {
             from_image: image,
             ..Default::default()
         };
-        let mut stream = self.client.create_image(Some(options), None, None);
+        let credentials = crate::registry::credentials_for_image(image)?;
+        let mut stream = self.client.create_image(Some(options), None, credentials);
         while let Some(result) = stream.next().await {
             result?;
         }
