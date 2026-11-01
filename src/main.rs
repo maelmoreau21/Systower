@@ -64,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &image,
                         &journal,
                         UpdateOptions {
+                            policy: config.policy(),
                             health_policy: HealthPolicy {
                                 allow_no_healthcheck,
                                 stability_seconds: 5,
@@ -76,7 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         },
                     )
                     .await?;
-                println!("updated: {}", result.container_name);
+                println!("container: {}", result.container_name);
+                println!("changed: {}", result.changed);
                 println!("state: {:?}", result.state);
             }
         },
