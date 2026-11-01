@@ -1,0 +1,23 @@
+name: Docker integration
+
+on:
+  pull_request:
+    branches: ["develop", "fix/rust-update-safety-guards"]
+  workflow_dispatch:
+
+jobs:
+  docker-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the Rust binary
+        run: cargo build --locked
+      - name: Verify disposable Docker environment
+        run: docker info
+      - name: Test real Docker updates, volumes, Compose guards and rollback
+        run: bash scripts/integration-docker.sh
