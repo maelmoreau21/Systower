@@ -75,7 +75,7 @@ async fn run_cycle(
             continue;
         }
         if config.dry_run || config.docker_monitor_only {
-            info!(container = %container.name, image = %container.image, "update candidate detected");
+            info!(container = %container.name, image = %container.image, "eligible container detected; image freshness not checked");
             continue;
         }
         let event = match engine
@@ -84,6 +84,7 @@ async fn run_cycle(
                 &container.image,
                 journal,
                 UpdateOptions {
+                    policy: config.policy(),
                     health_policy: HealthPolicy {
                         allow_no_healthcheck: config.docker_allow_no_healthcheck,
                         stability_seconds: 5,
@@ -98,6 +99,10 @@ async fn run_cycle(
             .await
         {
             Ok(result) => {
+                if !result.changed {
+                    info!(container = %result.container_name, "image unchanged; no update performed");
+                    continue;
+                }
                 info!(container = %result.container_name, "container update completed");
                 NotificationEvent {
                     event: "update.success".into(),
