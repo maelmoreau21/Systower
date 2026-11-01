@@ -283,6 +283,19 @@ impl DockerEngine {
                 .await
                 .is_ok();
             if !backup_exists {
+                if transaction.record().state == TransactionState::OriginalStopping
+                    && current_name.as_deref() == Some(original_name.as_str())
+                {
+                    transition(&mut transaction, TransactionState::RollingBack, journal)?;
+                    if let Err(error) = self.restart_original_if_needed(
+                        &original_name, rollback_health_timeout
+                    ).await {
+                        transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
+                        return Err(error);
+                    }
+                    transition(&mut transaction, TransactionState::RolledBack, journal)?;
+                    continue;
+                }
                 if transaction.record().state == TransactionState::ImagePulled
                     && current_name.as_deref() == Some(original_name.as_str())
                 {
@@ -555,28 +568,24 @@ impl DockerEngine {
             )));
         }
 
-        let running = value
-            .pointer("/State/Running")
-            .and_then(|running| running.as_bool())
-            .unwrap_or(false);
-        if running {
-            self.client
-                .stop_container(
-                    container_id,
-                    Some(StopContainerOptions {
-                        t: options.stop_timeout as i64,
-                    }),
-                )
-                .await?;
+        transition(&mut transaction, TransactionState::OriginalStopping, journal)?;
+        if let Err(error) = self.client.stop_container(
+            container_id,
+            Some(StopContainerOptions { t: options.stop_timeout as i64 }),
+        ).await {
+            return self.abort_before_backup(
+                &name, &mut transaction, journal, format!("stop failed: {error}"),
+                options.rollback_health_timeout,
+            ).await;
         }
-        self.client
-            .rename_container(
-                container_id,
-                RenameContainerOptions {
-                    name: backup_name.as_str(),
-                },
-            )
-            .await?;
+        if let Err(error) = self.client.rename_container(
+            container_id, RenameContainerOptions { name: backup_name.as_str() },
+        ).await {
+            return self.abort_before_backup(
+                &name, &mut transaction, journal, format!("rename failed: {error}"),
+                options.rollback_health_timeout,
+            ).await;
+        }
         transition(&mut transaction, TransactionState::BackupCreated, journal)?;
 
         let created = match self
@@ -674,6 +683,50 @@ impl DockerEngine {
             target_image_id,
             changed: true,
         })
+    }
+
+    async fn restart_original_if_needed(
+        &self,
+        container: &str,
+        timeout: u64,
+    ) -> Result<(), DockerError> {
+        let inspect = self.client.inspect_container(container, None).await?;
+        let running = serde_json::to_value(inspect)?
+            .pointer("/State/Running")
+            .and_then(|running| running.as_bool())
+            .unwrap_or(false);
+        if !running {
+            self.client.start_container::<String>(
+                container, None::<StartContainerOptions<String>>
+            ).await?;
+        }
+        self.wait_for_health(
+            container, timeout, HealthPolicy {
+                allow_no_healthcheck: true,
+                stability_seconds: 5,
+            },
+        ).await.map_err(DockerError::RollbackFailed)
+    }
+
+    async fn abort_before_backup(
+        &self,
+        container: &str,
+        transaction: &mut Transaction,
+        journal: &StateJournal,
+        reason: String,
+        timeout: u64,
+    ) -> Result<UpdateResult, DockerError> {
+        transition(transaction, TransactionState::RollingBack, journal)?;
+        if let Err(error) = self.restart_original_if_needed(container, timeout).await {
+            transition(transaction, TransactionState::RollbackFailed, journal)?;
+            return Err(DockerError::RollbackFailed(format!(
+                "{reason}; original container restoration failed: {error}"
+            )));
+        }
+        transition(transaction, TransactionState::RolledBack, journal)?;
+        Err(DockerError::UpdateFailed(format!(
+            "{reason}; original container restored and verified"
+        )))
     }
 
     async fn wait_for_health(
