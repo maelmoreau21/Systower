@@ -47,11 +47,11 @@ services:
       SYSTOWER_DOCKER_MONITOR_ONLY: "false"
       # Healthcheck timeout in seconds (default 60s gives apps like Technitium DNS / databases time to initialize)
       SYSTOWER_DOCKER_HEALTHCHECK_TIMEOUT: "60"
-      # Auto-update Systower itself at the end of the update cycle
+      # Self-update is not supported safely; leave disabled
       SYSTOWER_UPDATE_SELF: "false"
-      # Set to true only if you want to skip network-sensitive containers (Tailscale, Wireguard, Gluetun, Pi-hole, host network)
+      # Protect network-sensitive containers by default (Tailscale, WireGuard, Gluetun, Pi-hole, host mode)
       SYSTOWER_DOCKER_PROTECT_NETWORK_CONTAINERS: "true"
-      # Skip containers mounting docker.sock (Portainer, Traefik, dashboards) to avoid restarting management tools
+      # Protect containers mounting docker.sock (Portainer, Traefik, dashboards) by default
       SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS: "true"
       # Cooldown delay (in seconds) between container updates to prevent RAM/CPU spikes on Raspberry Pi
       SYSTOWER_DOCKER_UPDATE_DELAY: "2"
