@@ -4,10 +4,13 @@
 
 use std::{ffi::OsString, path::PathBuf, process::Command};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ComposeError {
+    #[error("Compose service '{0}' is not running; refusing to start it during an update")]
+    ServiceNotRunning(String),
     #[error("at least one Compose file is required")]
     MissingFile,
     #[error("at least one explicit service is required to avoid starting stopped services")]
@@ -22,6 +25,21 @@ pub enum ComposeError {
     Io(#[from] std::io::Error),
     #[error("docker compose {phase} failed with status {status}")]
     CommandFailed { phase: &'static str, status: String },
+}
+
+/// Only explicitly configured project files and services may be scheduled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeTarget {
+    pub files: Vec<PathBuf>,
+    #[serde(default)]
+    pub project_directory: Option<PathBuf>,
+    pub services: Vec<String>,
+}
+
+impl ComposeTarget {
+    pub fn plan(self) -> Result<ComposePlan, ComposeError> {
+        ComposePlan::new(self.files, self.project_directory, self.services)
+    }
 }
 
 #[derive(Debug)]
@@ -85,7 +103,7 @@ impl ComposePlan {
         &self.files
     }
 
-    pub fn steps(&self) -> Vec<ComposeStep> {
+    fn common_args(&self) -> Vec<OsString> {
         let mut common = vec![OsString::from("compose")];
         for file in &self.files {
             common.push(OsString::from("--file"));
@@ -95,7 +113,11 @@ impl ComposePlan {
             common.push(OsString::from("--project-directory"));
             common.push(directory.as_os_str().to_owned());
         }
+        common
+    }
 
+    pub fn steps(&self) -> Vec<ComposeStep> {
+        let common = self.common_args();
         let mut config = common.clone();
         config.extend([OsString::from("config"), OsString::from("--quiet")]);
 
@@ -135,14 +157,46 @@ pub fn execute(plan: &ComposePlan, apply: bool) -> Result<(), ComposeError> {
     if !apply {
         return Ok(());
     }
-    for step in plan.steps() {
-        let result = Command::new("docker").args(&step.args).status()?;
-        if !result.success() {
+    // Validate the exact source project before querying or changing containers.
+    let steps = plan.steps();
+    run_step(&steps[0])?;
+
+    // `up` starts services even if previously stopped. Only update services
+    // that are already running to avoid surprise restarts in scheduled cycles.
+    for service in plan.services() {
+        let mut args = plan.common_args();
+        args.extend([
+            OsString::from("ps"),
+            OsString::from("--status"),
+            OsString::from("running"),
+            OsString::from("--quiet"),
+            OsString::from(service),
+        ]);
+        let result = Command::new("docker").args(&args).output()?;
+        if !result.status.success() {
             return Err(ComposeError::CommandFailed {
-                phase: step.phase,
-                status: result.to_string(),
+                phase: "ps",
+                status: result.status.to_string(),
             });
         }
+        if result.stdout.iter().all(u8::is_ascii_whitespace) {
+            return Err(ComposeError::ServiceNotRunning(service.clone()));
+        }
+    }
+
+    for step in steps.iter().skip(1) {
+        run_step(step)?;
+    }
+    Ok(())
+}
+
+fn run_step(step: &ComposeStep) -> Result<(), ComposeError> {
+    let result = Command::new("docker").args(&step.args).status()?;
+    if !result.success() {
+        return Err(ComposeError::CommandFailed {
+            phase: step.phase,
+            status: result.to_string(),
+        });
     }
     Ok(())
 }
