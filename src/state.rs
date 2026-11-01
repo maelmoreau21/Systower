@@ -122,7 +122,10 @@ fn valid_transition(from: &TransactionState, to: &TransactionState) -> bool {
                 TransactionState::Committed
             )
             | (TransactionState::ImagePulled, TransactionState::RollingBack)
-            | (TransactionState::OriginalStopping, TransactionState::RollingBack)
+            | (
+                TransactionState::OriginalStopping,
+                TransactionState::RollingBack
+            )
             | (
                 TransactionState::BackupCreated,
                 TransactionState::RollingBack
