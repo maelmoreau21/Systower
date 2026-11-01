@@ -32,3 +32,38 @@ The program executes `docker compose config --quiet`, then `docker compose pull 
 - No periodic Compose updates or automatic project discovery yet.
 - No transactional Compose rollback; successful process exit does not guarantee application health.
 - Systower's current Docker image may not ship a Docker Compose CLI. Use the host-side binary or install a compatible CLI and mount the project files.
+
+
+## Scheduled updates (explicit opt-in)
+
+You can schedule *only* configured Compose projects and services through Systower's existing cron cycle. This is **disabled by default**.
+
+```yaml
+services:
+  systower:
+    build:
+      context: .
+      args:
+        WITH_COMPOSE: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/projects:/srv/projects:ro
+      - systower-state:/var/lib/systower
+    environment:
+      SYSTOWER_DOCKER_ENABLED: "false"
+      SYSTOWER_COMPOSE_ENABLED: "true"
+      SYSTOWER_COMPOSE_TARGETS_JSON: >-
+        [{"files":["/srv/projects/web/compose.yml"],
+          "project_directory":"/srv/projects/web",
+          "services":["web"]}]
+      SYSTOWER_CRON: "0 4 * * *"
+      SYSTOWER_DRY_RUN: "true"
+volumes:
+  systower-state:
+```
+
+**Important:** set `SYSTOWER_DRY_RUN=false` only after reviewing the selected project files and service names. The Compose CLI is included in the image only when building with `WITH_COMPOSE=true`; this intentionally increases the image size. Mounted project paths must resolve to the same paths on the Docker host for bind mounts. Docker socket access effectively grants host-level privileges.
+
+Scheduled updates first validate the Compose project and check that **each selected service is already running**. Stopped services are not started. Then they perform the service-scoped pull/up sequence. The daemon does not automatically discover Compose projects and does not assert that an updated image was available.
+
+**Limitations:** no transactional rollback, no automated data backups, no remote digest precheck, no guarantee of application readiness. Compose files and any referenced `.env` must be readable in the updater container. Avoid adding databases and networking components unless you have a maintenance and recovery plan.
