@@ -21,3 +21,8 @@ jobs:
       - run: cargo test --all-targets --locked
       - uses: taiki-e/install-action@cargo-audit
       - run: cargo audit
+      - name: Docker Engine integration tests
+        run: |
+          cargo build --locked
+          docker info
+          bash scripts/integration-docker.sh
