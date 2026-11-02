@@ -10,7 +10,7 @@ RUN mkdir -p src benches \
 RUN cargo build --release
 COPY src ./src
 COPY benches ./benches
-RUN cargo build --release
+RUN touch src/lib.rs src/main.rs benches/core.rs && cargo build --release
 
 FROM alpine:3.20
 # Optional: Compose increases the image size substantially. Keep the default lean.
