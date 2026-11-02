@@ -3,6 +3,7 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::{
+    compose::{self, ComposePlan},
     config::Config,
     docker::{DockerEngine, UpdateOptions},
     notify::{NotificationEvent, Notifier},
@@ -55,6 +56,7 @@ async fn run_cycle(
     notifier: Option<&Notifier>,
 ) {
     let Some(engine) = engine else {
+        run_compose_updates(config, notifier).await;
         return run_system_update(config).await;
     };
 
@@ -65,6 +67,7 @@ async fn run_cycle(
         Ok(containers) => containers,
         Err(error) => {
             error!(%error, "cannot enumerate Docker containers");
+            run_compose_updates(config, notifier).await;
             return run_system_update(config).await;
         }
     };
@@ -143,7 +146,71 @@ async fn run_cycle(
         }
     }
 
+    run_compose_updates(config, notifier).await;
     run_system_update(config).await;
+}
+
+/// Compose is an independent opt-in update path: it only uses configured source
+/// projects and selected services, and does not reconstruct containers manually.
+async fn run_compose_updates(config: &Config, notifier: Option<&Notifier>) {
+    if !config.compose_enabled {
+        return;
+    }
+    let targets = match config.compose_targets() {
+        Ok(targets) => targets,
+        Err(error) => {
+            error!(%error, "invalid scheduled Compose target configuration");
+            return;
+        }
+    };
+    for target in targets {
+        let service_names = target.services.join(", ");
+        let plan = match ComposePlan::new(target.files, target.project_directory, target.services) {
+            Ok(plan) => plan,
+            Err(error) => {
+                warn!(services = %service_names, %error, "Compose target preflight failed");
+                continue;
+            }
+        };
+        if config.dry_run || config.docker_monitor_only {
+            info!(services = %service_names, "Compose target eligible; dry run did not check remote images");
+            continue;
+        }
+
+        let result = tokio::task::spawn_blocking(move || compose::execute(&plan, true)).await;
+        let event = match result {
+            Ok(Ok(())) => {
+                info!(services = %service_names, "Compose update commands completed");
+                NotificationEvent {
+                    event: "compose.checked".into(),
+                    title: format!("Compose command completed: {service_names}"),
+                    message: "Compose pull/up completed; application-level health is not verified"
+                        .into(),
+                }
+            }
+            Ok(Err(error)) => {
+                warn!(services = %service_names, %error, "Compose update command failed");
+                NotificationEvent {
+                    event: "compose.failure".into(),
+                    title: format!("Compose command failed: {service_names}"),
+                    message: error.to_string(),
+                }
+            }
+            Err(error) => {
+                warn!(services = %service_names, %error, "Compose update worker failed");
+                NotificationEvent {
+                    event: "compose.failure".into(),
+                    title: format!("Compose worker failed: {service_names}"),
+                    message: error.to_string(),
+                }
+            }
+        };
+        if let Some(notifier) = notifier {
+            if let Err(error) = notifier.send(&event).await {
+                warn!(%error, "Compose notification delivery failed");
+            }
+        }
+    }
 }
 
 async fn run_system_update(config: &Config) {

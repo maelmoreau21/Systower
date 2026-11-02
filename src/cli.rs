@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -17,9 +18,34 @@ pub enum Command {
     Status,
     Check,
     Docker(DockerArgs),
+    Compose(ComposeArgs),
     System(SystemArgs),
     Config(ConfigArgs),
     Version,
+}
+
+#[derive(Debug, Args)]
+pub struct ComposeArgs {
+    #[command(subcommand)]
+    pub command: ComposeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ComposeCommand {
+    Update {
+        /// Explicit Compose files; paths are resolved before execution.
+        #[arg(short = 'f', long = "file", required = true)]
+        files: Vec<PathBuf>,
+        /// The original Compose working directory containing .env and other files.
+        #[arg(long)]
+        project_directory: Option<PathBuf>,
+        /// Only explicitly selected services may be updated.
+        #[arg(long = "service", required = true)]
+        services: Vec<String>,
+        /// Explicitly run docker compose; without this flag only preview the plan.
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Debug, Args)]

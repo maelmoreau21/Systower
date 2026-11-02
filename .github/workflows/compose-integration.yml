@@ -1,0 +1,25 @@
+name: Compose integration
+
+on:
+  pull_request:
+    branches: ["develop", "feat/compose-native-cli"]
+  workflow_dispatch:
+
+jobs:
+  compose-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Rust binary
+        run: cargo build --locked
+      - name: Test Docker Compose CLI and scheduled opt-in
+        run: |
+          docker compose version
+          bash scripts/integration-compose.sh
+      - name: Build optional Compose-enabled runtime
+        run: |
+          docker build --build-arg WITH_COMPOSE=true -t systower-compose-ci .
+          docker run --rm --entrypoint docker systower-compose-ci compose version

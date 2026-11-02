@@ -4,7 +4,7 @@ on:
   push:
     branches: ["develop", "rust-v2"]
   pull_request:
-    branches: ["main", "develop", "rust-v2", "fix/rust-update-safety-guards"]
+    branches: ["main", "develop", "rust-v2"]
 
 jobs:
   quality:

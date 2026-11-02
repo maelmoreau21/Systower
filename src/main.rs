@@ -1,7 +1,8 @@
 use clap::Parser;
-use systower::cli::{ConfigCommand, DockerCommand, SystemCommand};
+use systower::cli::{ComposeCommand, ConfigCommand, DockerCommand, SystemCommand};
 use systower::{
     cli::{Cli, Command},
+    compose::ComposePlan,
     config::Config,
     daemon,
     docker::{DockerEngine, UpdateOptions},
@@ -80,6 +81,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("container: {}", result.container_name);
                 println!("changed: {}", result.changed);
                 println!("state: {:?}", result.state);
+            }
+        },
+        Command::Compose(args) => match args.command {
+            ComposeCommand::Update {
+                files,
+                project_directory,
+                services,
+                apply,
+            } => {
+                let plan = ComposePlan::new(files, project_directory, services)?;
+                println!("Compose service update plan:");
+                for file in plan.files() {
+                    println!("  file: {}", file.display());
+                }
+                println!("  services: {}", plan.services().join(", "));
+                if apply {
+                    let _lock = InstanceLock::acquire(format!("{}.lock", config.state_file))?;
+                    systower::compose::execute(&plan, true)?;
+                    println!("Compose update command completed");
+                } else {
+                    println!("preview only: add --apply to run docker compose");
+                }
             }
         },
         Command::System(args) => match args.command {

@@ -13,7 +13,10 @@ COPY benches ./benches
 RUN cargo build --release
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata util-linux
+# Optional: Compose increases the image size substantially. Keep the default lean.
+ARG WITH_COMPOSE=false
+RUN apk add --no-cache ca-certificates tzdata util-linux \
+    && if [ "$WITH_COMPOSE" = "true" ]; then apk add --no-cache docker-cli-compose; fi
 COPY --from=builder /build/target/release/systower /usr/local/bin/systower
 
 ENV SYSTOWER_CRON="0 4 * * *" \
