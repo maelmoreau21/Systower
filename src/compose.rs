@@ -217,7 +217,10 @@ mod tests {
         let file = std::env::temp_dir().join(format!(
             "systower-compose-test-{}-{}.yaml",
             std::process::id(),
-            std::thread::current().name().unwrap_or("main")
+            std::thread::current()
+                .name()
+                .unwrap_or("main")
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
         ));
         std::fs::write(&file, "services:\n  web:\n    image: nginx:alpine\n").unwrap();
         let plan = ComposePlan::new(vec![file.clone()], None, vec!["web".into()]).unwrap();
