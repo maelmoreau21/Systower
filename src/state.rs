@@ -1,11 +1,8 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
-
-#[cfg(windows)]
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -238,41 +235,36 @@ impl StateJournal {
 }
 
 pub struct InstanceLock {
-    path: PathBuf,
     _file: File,
 }
 
 impl InstanceLock {
+    /// Acquire an exclusive OS-level lock on `path`.
+    ///
+    /// Uses kernel-managed locks (`flock` on Unix, exclusive `share_mode(0)` on Windows)
+    /// so locks are automatically released on process exit, crash, `SIGKILL`, or
+    /// container restart—even when the restarted process reuses the same PID (e.g. PID 1).
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StateError> {
         let path = path.as_ref().to_path_buf();
-        let file = loop {
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(file) => break file,
-                Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let owner = fs::read_to_string(&path).ok();
-                    let stale = owner
-                        .as_deref()
-                        .and_then(|value| value.trim().parse::<u32>().ok())
-                        .is_some_and(|pid| !process_is_alive(pid));
-                    if stale
-                        || owner
-                            .as_deref()
-                            .is_some_and(|value| value.trim().is_empty())
-                    {
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                    return Err(StateError::AlreadyLocked(path.clone()));
-                }
-                Err(source) => {
-                    return Err(StateError::Open {
-                        path: path.clone(),
-                        source,
-                    });
-                }
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).map_err(|source| StateError::Write {
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
             }
-        };
-        let mut file = file;
+        }
+
+        let mut file = open_and_lock(&path)?;
+        file.set_len(0).map_err(|source| StateError::Write {
+            path: path.clone(),
+            source,
+        })?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|source| StateError::Write {
+                path: path.clone(),
+                source,
+            })?;
         writeln!(file, "{}", std::process::id()).map_err(|source| StateError::Write {
             path: path.clone(),
             source,
@@ -281,34 +273,84 @@ impl InstanceLock {
             path: path.clone(),
             source,
         })?;
-        Ok(Self { path, _file: file })
+        Ok(Self { _file: file })
     }
 }
 
-fn process_is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        Path::new("/proc").join(pid.to_string()).exists()
-    }
-    #[cfg(windows)]
-    {
-        Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}")])
-            .output()
-            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        true
+#[cfg(unix)]
+fn open_and_lock(path: &Path) -> Result<File, StateError> {
+    use std::os::fd::AsRawFd;
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|source| StateError::Open {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    // Retry only on EINTR; EWOULDBLOCK/EAGAIN means another live process holds the lock.
+    loop {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc == 0 {
+            return Ok(file);
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EINTR) {
+            continue;
+        }
+        if matches!(
+            err.raw_os_error(),
+            Some(libc::EWOULDBLOCK) | Some(libc::EAGAIN)
+        ) {
+            return Err(StateError::AlreadyLocked(path.to_path_buf()));
+        }
+        return Err(StateError::Open {
+            path: path.to_path_buf(),
+            source: err,
+        });
     }
 }
 
-impl Drop for InstanceLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+#[cfg(windows)]
+fn open_and_lock(path: &Path) -> Result<File, StateError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(path)
+    {
+        Ok(file) => Ok(file),
+        Err(source) if source.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+            Err(StateError::AlreadyLocked(path.to_path_buf()))
+        }
+        Err(source) => Err(StateError::Open {
+            path: path.to_path_buf(),
+            source,
+        }),
     }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_and_lock(path: &Path) -> Result<File, StateError> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|source| StateError::Open {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
 #[cfg(test)]
@@ -366,6 +408,31 @@ mod tests {
         let lock = InstanceLock::acquire(&path).unwrap();
         drop(lock);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn stale_lock_with_current_pid_is_reclaimed() {
+        let path = temp_path("stale-self-pid-lock");
+        let _ = fs::remove_file(&path);
+        fs::write(&path, format!("{}\n", std::process::id())).unwrap();
+        let lock = InstanceLock::acquire(&path).unwrap();
+        assert!(matches!(
+            InstanceLock::acquire(&path),
+            Err(StateError::AlreadyLocked(_))
+        ));
+        drop(lock);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn acquire_creates_missing_parent_directory() {
+        let dir = temp_path("lock-parent-dir");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("nested").join("state.jsonl.lock");
+        let lock = InstanceLock::acquire(&path).unwrap();
+        assert!(path.exists());
+        drop(lock);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -14,11 +14,14 @@ cron = "0.15"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 criterion = "0.5"

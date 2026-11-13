@@ -44,8 +44,36 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let delay = delay_until_next(&config.cron)?;
         info!(seconds = delay.as_secs(), "next update cycle scheduled");
-        tokio::time::sleep(delay.max(Duration::from_secs(1))).await;
+        tokio::select! {
+            _ = tokio::time::sleep(delay.max(Duration::from_secs(1))) => {}
+            _ = shutdown_signal() => {
+                info!("shutdown signal received; stopping daemon");
+                return Ok(());
+            }
+        }
         run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await;
+    }
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 
