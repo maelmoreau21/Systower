@@ -302,10 +302,8 @@ fn open_and_lock(path: &Path) -> Result<File, StateError> {
         if err.raw_os_error() == Some(libc::EINTR) {
             continue;
         }
-        if matches!(
-            err.raw_os_error(),
-            Some(libc::EWOULDBLOCK) | Some(libc::EAGAIN)
-        ) {
+        if err.raw_os_error() == Some(libc::EWOULDBLOCK) || err.raw_os_error() == Some(libc::EAGAIN)
+        {
             return Err(StateError::AlreadyLocked(path.to_path_buf()));
         }
         return Err(StateError::Open {
