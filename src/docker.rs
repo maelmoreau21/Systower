@@ -10,13 +10,14 @@ use bollard::{
         StopContainerOptions,
     },
     image::{CreateImageOptions, PruneImagesOptions, RemoveImageOptions},
-    models::{ContainerInspectResponse, ContainerSummary, EndpointSettings},
+    models::{ContainerInspectResponse, ContainerSummary, EndpointSettings, HostConfig},
+    network::ConnectNetworkOptions,
     Docker,
 };
 use futures_util::StreamExt;
 use thiserror::Error;
 
-use crate::policy::{ContainerFacts, ContainerPolicy};
+use crate::policy::{ContainerFacts, ContainerPolicy, PolicyDecision, SkipReason};
 use crate::{
     state::{StateError, StateJournal, Transaction, TransactionState},
     update::{health_is_acceptable, HealthPolicy, HealthStatus},
@@ -56,6 +57,7 @@ pub struct ContainerSnapshot {
 
 pub struct RecreationConfig {
     pub config: DockerConfig<String>,
+    pub extra_networks: Vec<(String, EndpointSettings)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +66,14 @@ pub struct UpdateResult {
     pub state: TransactionState,
     pub target_image_id: String,
     pub changed: bool,
+    pub skipped_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EvaluatedContainers {
+    pub allowed: Vec<ContainerSnapshot>,
+    pub self_container: Option<ContainerSnapshot>,
+    pub skipped: Vec<(String, SkipReason)>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,35 +102,59 @@ impl RecreationConfig {
         if let Some(host_config) = value.get("HostConfig") {
             config.host_config = Some(serde_json::from_value(host_config.clone())?);
         }
-        if let Some(networks) = value.pointer("/NetworkSettings/Networks") {
-            let mut networks = networks.clone();
-            if let Some(networks) = networks.as_object_mut() {
-                for endpoint in networks
-                    .values_mut()
-                    .filter_map(|value| value.as_object_mut())
-                {
-                    for field in [
-                        "NetworkID",
-                        "EndpointID",
-                        "Gateway",
-                        "IPAddress",
-                        "IPPrefixLen",
-                        "IPv6Gateway",
-                        "GlobalIPv6Address",
-                        "GlobalIPv6PrefixLen",
-                        "MacAddress",
-                    ] {
-                        endpoint.remove(field);
+        let network_mode = value
+            .pointer("/HostConfig/NetworkMode")
+            .and_then(|mode| mode.as_str())
+            .unwrap_or_default();
+        let skip_networking =
+            matches!(network_mode, "host" | "none") || network_mode.starts_with("container:");
+        let mut extra_networks = Vec::new();
+        if !skip_networking {
+            if let Some(networks) = value.pointer("/NetworkSettings/Networks") {
+                let mut networks = networks.clone();
+                if let Some(networks) = networks.as_object_mut() {
+                    for endpoint in networks
+                        .values_mut()
+                        .filter_map(|value| value.as_object_mut())
+                    {
+                        for field in [
+                            "NetworkID",
+                            "EndpointID",
+                            "Gateway",
+                            "IPAddress",
+                            "IPPrefixLen",
+                            "IPv6Gateway",
+                            "GlobalIPv6Address",
+                            "GlobalIPv6PrefixLen",
+                            "MacAddress",
+                            "DNSNames",
+                        ] {
+                            endpoint.remove(field);
+                        }
                     }
                 }
+                let endpoints: std::collections::HashMap<String, EndpointSettings> =
+                    serde_json::from_value(networks)?;
+                if !endpoints.is_empty() {
+                    let mut sorted: Vec<(String, EndpointSettings)> =
+                        endpoints.into_iter().collect();
+                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                    let mut iter = sorted.into_iter();
+                    if let Some((first_net, first_ep)) = iter.next() {
+                        let mut primary = std::collections::HashMap::new();
+                        primary.insert(first_net, first_ep);
+                        config.networking_config = Some(NetworkingConfig {
+                            endpoints_config: primary,
+                        });
+                    }
+                    extra_networks.extend(iter);
+                }
             }
-            let endpoints: std::collections::HashMap<String, EndpointSettings> =
-                serde_json::from_value(networks)?;
-            config.networking_config = Some(NetworkingConfig {
-                endpoints_config: endpoints,
-            });
         }
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            extra_networks,
+        })
     }
 }
 
@@ -366,18 +400,10 @@ impl DockerEngine {
         Ok(())
     }
 
-    pub async fn list_allowed(
+    pub async fn list_evaluated(
         &self,
         policy: &ContainerPolicy,
-    ) -> Result<Vec<ContainerSnapshot>, DockerError> {
-        self.list_allowed_with_self(policy, false).await
-    }
-
-    pub async fn list_allowed_with_self(
-        &self,
-        policy: &ContainerPolicy,
-        include_self: bool,
-    ) -> Result<Vec<ContainerSnapshot>, DockerError> {
+    ) -> Result<EvaluatedContainers, DockerError> {
         let summaries = self
             .client
             .list_containers(Some(ListContainersOptions::<String> {
@@ -386,6 +412,8 @@ impl DockerEngine {
             }))
             .await?;
         let mut allowed = Vec::new();
+        let mut self_container = None;
+        let mut skipped = Vec::new();
         for summary in summaries {
             let Some(mut container) = ContainerSnapshot::from_summary(summary) else {
                 continue;
@@ -393,13 +421,41 @@ impl DockerEngine {
             let inspect = self.client.inspect_container(&container.id, None).await?;
             container.apply_inspect(&inspect)?;
             let facts = container.facts();
-            if (include_self && facts.is_self && !facts.excluded_by_label)
-                || (!facts.is_self && policy.allows(&facts))
-            {
-                allowed.push(container);
+            if facts.is_self && !facts.excluded_by_label {
+                self_container = Some(container);
+                continue;
+            }
+            match policy.evaluate(&facts) {
+                PolicyDecision::Allowed => allowed.push(container),
+                PolicyDecision::Skipped(reason) => skipped.push((container.name, reason)),
             }
         }
-        Ok(allowed)
+        Ok(EvaluatedContainers {
+            allowed,
+            self_container,
+            skipped,
+        })
+    }
+
+    pub async fn list_allowed(
+        &self,
+        policy: &ContainerPolicy,
+    ) -> Result<Vec<ContainerSnapshot>, DockerError> {
+        Ok(self.list_evaluated(policy).await?.allowed)
+    }
+
+    pub async fn list_allowed_with_self(
+        &self,
+        policy: &ContainerPolicy,
+        include_self: bool,
+    ) -> Result<Vec<ContainerSnapshot>, DockerError> {
+        let mut evaluated = self.list_evaluated(policy).await?;
+        if include_self {
+            if let Some(self_container) = evaluated.self_container {
+                evaluated.allowed.push(self_container);
+            }
+        }
+        Ok(evaluated.allowed)
     }
 
     pub async fn pull_image(&self, image: &str) -> Result<String, DockerError> {
@@ -528,6 +584,17 @@ impl DockerEngine {
             .and_then(|image| image.as_str())
             .unwrap_or_default()
             .to_owned();
+        if options.pull && self.is_unpullable_image(target_image, &old_image_id).await {
+            return Ok(UpdateResult {
+                container_name: name,
+                state: TransactionState::Committed,
+                target_image_id: old_image_id,
+                changed: false,
+                skipped_reason: Some(
+                    "local-only or digest-pinned image without registry tag".into(),
+                ),
+            });
+        }
         let target_image_id = if options.pull {
             self.pull_image(target_image).await?
         } else {
@@ -539,6 +606,7 @@ impl DockerEngine {
                 state: TransactionState::Committed,
                 target_image_id,
                 changed: false,
+                skipped_reason: None,
             });
         }
 
@@ -623,18 +691,8 @@ impl DockerEngine {
         }
         transition(&mut transaction, TransactionState::BackupCreated, journal)?;
 
-        let created = match self
-            .client
-            .create_container(
-                Some(CreateContainerOptions {
-                    name: name.as_str(),
-                    platform: None,
-                }),
-                recreation.config,
-            )
-            .await
-        {
-            Ok(created) => created,
+        let created_id = match self.create_and_connect_container(&name, recreation).await {
+            Ok(id) => id,
             Err(error) => {
                 return self
                     .rollback_after_failure(
@@ -655,7 +713,7 @@ impl DockerEngine {
         )?;
         if let Err(error) = self
             .client
-            .start_container::<String>(&created.id, None::<StartContainerOptions<String>>)
+            .start_container::<String>(&created_id, None::<StartContainerOptions<String>>)
             .await
         {
             return self
@@ -717,7 +775,248 @@ impl DockerEngine {
             state: transaction.record().state.clone(),
             target_image_id,
             changed: true,
+            skipped_reason: None,
         })
+    }
+
+    async fn is_unpullable_image(&self, target_image: &str, current_image_id: &str) -> bool {
+        if target_image.starts_with("sha256:") {
+            return true;
+        }
+        let Ok(inspected) = self.client.inspect_image(current_image_id).await else {
+            return false;
+        };
+        let has_no_digests = inspected
+            .repo_digests
+            .is_some_and(|digests| digests.is_empty());
+        has_no_digests && (!target_image.contains('/') || target_image.ends_with(":local"))
+    }
+
+    async fn create_and_connect_container(
+        &self,
+        name: &str,
+        recreation: RecreationConfig,
+    ) -> Result<String, DockerError> {
+        let created = self
+            .client
+            .create_container(
+                Some(CreateContainerOptions {
+                    name,
+                    platform: None,
+                }),
+                recreation.config,
+            )
+            .await?;
+        for (network, endpoint_config) in recreation.extra_networks {
+            self.client
+                .connect_network(
+                    &network,
+                    ConnectNetworkOptions {
+                        container: created.id.clone(),
+                        endpoint_config,
+                    },
+                )
+                .await?;
+        }
+        Ok(created.id)
+    }
+
+    /// Pull the latest image for `self_container` and, if changed, launch a short-lived
+    /// helper container from the new image to perform `docker self-replace`.
+    pub async fn schedule_self_update(
+        &self,
+        self_container: &ContainerSnapshot,
+        stop_timeout: u64,
+        health_timeout: u64,
+    ) -> Result<bool, DockerError> {
+        if self
+            .is_unpullable_image(&self_container.image, &self_container.image_id)
+            .await
+        {
+            return Ok(false);
+        }
+        let target_image_id = self.pull_image(&self_container.image).await?;
+        if target_image_id == self_container.image_id {
+            return Ok(false);
+        }
+        let helper_name = format!("{}_systower_updater", self_container.name);
+        let _ = self
+            .client
+            .remove_container(
+                &helper_name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    link: false,
+                    v: false,
+                }),
+            )
+            .await;
+        let helper_config = DockerConfig {
+            image: Some(target_image_id),
+            cmd: Some(vec![
+                "docker".into(),
+                "self-replace".into(),
+                "--container".into(),
+                self_container.name.clone(),
+                "--image".into(),
+                self_container.image.clone(),
+                "--stop-timeout".into(),
+                stop_timeout.to_string(),
+                "--health-timeout".into(),
+                health_timeout.to_string(),
+            ]),
+            host_config: Some(HostConfig {
+                binds: Some(vec!["/var/run/docker.sock:/var/run/docker.sock".into()]),
+                auto_remove: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let created = self
+            .client
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: helper_name.as_str(),
+                    platform: None,
+                }),
+                helper_config,
+            )
+            .await?;
+        self.client
+            .start_container::<String>(&created.id, None::<StartContainerOptions<String>>)
+            .await?;
+        Ok(true)
+    }
+
+    pub async fn self_replace(
+        &self,
+        container_name: &str,
+        target_image: &str,
+        stop_timeout: u64,
+        health_timeout: u64,
+    ) -> Result<(), DockerError> {
+        // Wait briefly for the previous Systower instance to exit and release its lock.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            let inspect = self.client.inspect_container(container_name, None).await?;
+            let running = serde_json::to_value(&inspect)?
+                .pointer("/State/Running")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !running {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                let _ = self
+                    .client
+                    .stop_container(
+                        container_name,
+                        Some(StopContainerOptions {
+                            t: stop_timeout as i64,
+                        }),
+                    )
+                    .await;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
+        let inspect = self.client.inspect_container(container_name, None).await?;
+        let old_image_id = inspect.image.clone().unwrap_or_default();
+        let recreation = RecreationConfig::from_inspect(&inspect, target_image)?;
+        let backup_name = format!("{container_name}_systower_bak");
+        let _ = self
+            .client
+            .remove_container(
+                &backup_name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    link: false,
+                    v: false,
+                }),
+            )
+            .await;
+        self.client
+            .rename_container(
+                container_name,
+                RenameContainerOptions {
+                    name: backup_name.as_str(),
+                },
+            )
+            .await?;
+
+        let replace_result: Result<(), DockerError> = async {
+            let created_id = self
+                .create_and_connect_container(container_name, recreation)
+                .await?;
+            self.client
+                .start_container::<String>(&created_id, None::<StartContainerOptions<String>>)
+                .await?;
+            self.wait_for_health(
+                container_name,
+                health_timeout,
+                HealthPolicy {
+                    allow_no_healthcheck: true,
+                    stability_seconds: 5,
+                },
+            )
+            .await
+            .map_err(DockerError::UpdateFailed)?;
+            Ok(())
+        }
+        .await;
+
+        if let Err(error) = replace_result {
+            let _ = self
+                .client
+                .remove_container(
+                    container_name,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        link: false,
+                        v: false,
+                    }),
+                )
+                .await;
+            self.client
+                .rename_container(
+                    &backup_name,
+                    RenameContainerOptions {
+                        name: container_name,
+                    },
+                )
+                .await?;
+            self.client
+                .start_container::<String>(container_name, None::<StartContainerOptions<String>>)
+                .await?;
+            return Err(error);
+        }
+
+        let _ = self
+            .client
+            .remove_container(
+                &backup_name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    link: false,
+                    v: false,
+                }),
+            )
+            .await;
+        if !old_image_id.is_empty() {
+            let _ = self
+                .client
+                .remove_image(
+                    &old_image_id,
+                    Some(RemoveImageOptions {
+                        force: false,
+                        noprune: true,
+                    }),
+                    None,
+                )
+                .await;
+        }
+        Ok(())
     }
 
     async fn restart_original_if_needed(
@@ -1055,5 +1354,36 @@ mod tests {
         assert!(has_effective_healthcheck(&serde_json::json!({
             "Config": {"Healthcheck": {"Test": ["CMD", "true"]}}
         })));
+    }
+
+    #[test]
+    fn recreation_splits_multi_network_endpoints_and_skips_host_mode() {
+        let multi: ContainerInspectResponse = serde_json::from_value(serde_json::json!({
+            "Config": {},
+            "HostConfig": {"NetworkMode": "net_a"},
+            "NetworkSettings": {
+                "Networks": {
+                    "net_b": {"Aliases": ["web"], "DNSNames": ["web"]},
+                    "net_a": {"Aliases": ["api"]}
+                }
+            }
+        }))
+        .unwrap();
+        let rec = RecreationConfig::from_inspect(&multi, "example/api:v2").unwrap();
+        let primary = rec.config.networking_config.unwrap().endpoints_config;
+        assert_eq!(primary.len(), 1);
+        assert!(primary.contains_key("net_a"));
+        assert_eq!(rec.extra_networks.len(), 1);
+        assert_eq!(rec.extra_networks[0].0, "net_b");
+
+        let host_net: ContainerInspectResponse = serde_json::from_value(serde_json::json!({
+            "Config": {},
+            "HostConfig": {"NetworkMode": "host"},
+            "NetworkSettings": {"Networks": {"host": {}}}
+        }))
+        .unwrap();
+        let rec_host = RecreationConfig::from_inspect(&host_net, "example/dns:v2").unwrap();
+        assert!(rec_host.config.networking_config.is_none());
+        assert!(rec_host.extra_networks.is_empty());
     }
 }

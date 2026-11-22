@@ -10,6 +10,7 @@ fn policy_decision(c: &mut Criterion) {
         exclude: Vec::new(),
         protect_network: true,
         protect_socket: true,
+        allow_compose: false,
     };
     let facts = ContainerFacts {
         name: "api".into(),

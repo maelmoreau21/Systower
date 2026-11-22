@@ -38,6 +38,7 @@ pub struct Config {
     pub docker_rollback_healthcheck_timeout: u64,
     pub docker_protect_network_containers: bool,
     pub docker_protect_socket_containers: bool,
+    pub docker_allow_compose: bool,
     pub docker_update_delay: u64,
     pub update_self: bool,
     pub system_enabled: bool,
@@ -88,6 +89,7 @@ impl Config {
                 "SYSTOWER_DOCKER_PROTECT_SOCKET_CONTAINERS",
                 true,
             )?,
+            docker_allow_compose: boolean("SYSTOWER_DOCKER_ALLOW_COMPOSE", false)?,
             docker_update_delay: positive_integer("SYSTOWER_DOCKER_UPDATE_DELAY", 2)?,
             update_self: boolean("SYSTOWER_UPDATE_SELF", false)?,
             system_enabled: boolean("SYSTOWER_SYSTEM_ENABLED", false)?,
@@ -148,6 +150,7 @@ impl Config {
             exclude: self.exclude.clone(),
             protect_network: self.docker_protect_network_containers,
             protect_socket: self.docker_protect_socket_containers,
+            allow_compose: self.docker_allow_compose,
         }
     }
 }

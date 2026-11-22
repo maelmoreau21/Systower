@@ -94,6 +94,16 @@ pub enum DockerCommand {
         #[arg(long)]
         image: String,
     },
+    SelfReplace {
+        #[arg(long)]
+        container: String,
+        #[arg(long)]
+        image: String,
+        #[arg(long, default_value_t = 30)]
+        stop_timeout: u64,
+        #[arg(long, default_value_t = 60)]
+        health_timeout: u64,
+    },
 }
 
 #[derive(Debug, Args)]

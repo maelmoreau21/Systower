@@ -37,8 +37,9 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    if config.run_on_start {
-        run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await;
+    if config.run_on_start && run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await
+    {
+        return Ok(());
     }
 
     loop {
@@ -51,7 +52,9 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
         }
-        run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await;
+        if run_cycle(&config, engine.as_ref(), &journal, notifier.as_ref()).await {
+            return Ok(());
+        }
     }
 }
 
@@ -82,29 +85,54 @@ async fn run_cycle(
     engine: Option<&DockerEngine>,
     journal: &StateJournal,
     notifier: Option<&Notifier>,
-) {
+) -> bool {
     let Some(engine) = engine else {
         run_compose_updates(config, notifier).await;
-        return run_system_update(config).await;
+        run_system_update(config).await;
+        return false;
     };
 
-    let containers = match engine
-        .list_allowed_with_self(&config.policy(), config.update_self)
-        .await
-    {
-        Ok(containers) => containers,
+    let evaluated = match engine.list_evaluated(&config.policy()).await {
+        Ok(evaluated) => evaluated,
         Err(error) => {
             error!(%error, "cannot enumerate Docker containers");
             run_compose_updates(config, notifier).await;
-            return run_system_update(config).await;
+            run_system_update(config).await;
+            return false;
         }
     };
 
-    for container in containers {
-        if container.facts().is_self && config.update_self {
-            warn!(container = %container.name, "self-update skipped because replacing the running daemon would interrupt its transaction");
-            continue;
+    let mut skipped_count = evaluated.skipped.len();
+    for (name, reason) in &evaluated.skipped {
+        info!(container = %name, reason = %reason, "container skipped by policy");
+    }
+
+    let compose_managed_services: std::collections::HashSet<String> = if config.compose_enabled {
+        config
+            .compose_targets()
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|target| target.services)
+            .map(|service| service.to_ascii_lowercase())
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    let mut checked_count = 0usize;
+    let mut updated_count = 0usize;
+    let mut unchanged_count = 0usize;
+    let mut failed_count = 0usize;
+
+    for container in evaluated.allowed {
+        if let Some(service) = container.labels.get("com.docker.compose.service") {
+            if compose_managed_services.contains(&service.to_ascii_lowercase()) {
+                info!(container = %container.name, %service, "container handled by explicit compose target; skipping standalone update");
+                skipped_count += 1;
+                continue;
+            }
         }
+        checked_count += 1;
         if config.dry_run || config.docker_monitor_only {
             info!(container = %container.name, image = %container.image, "eligible container detected; image freshness not checked");
             continue;
@@ -130,10 +158,17 @@ async fn run_cycle(
             .await
         {
             Ok(result) => {
-                if !result.changed {
-                    info!(container = %result.container_name, "image unchanged; no update performed");
+                if let Some(reason) = result.skipped_reason {
+                    info!(container = %result.container_name, %reason, "container skipped");
+                    skipped_count += 1;
                     continue;
                 }
+                if !result.changed {
+                    info!(container = %result.container_name, "image unchanged; no update performed");
+                    unchanged_count += 1;
+                    continue;
+                }
+                updated_count += 1;
                 info!(container = %result.container_name, "container update completed");
                 NotificationEvent {
                     event: "update.success".into(),
@@ -142,6 +177,7 @@ async fn run_cycle(
                 }
             }
             Err(error) => {
+                failed_count += 1;
                 warn!(container = %container.name, %error, "container update failed");
                 NotificationEvent {
                     event: "update.failure".into(),
@@ -176,6 +212,41 @@ async fn run_cycle(
 
     run_compose_updates(config, notifier).await;
     run_system_update(config).await;
+
+    info!(
+        checked = checked_count,
+        updated = updated_count,
+        unchanged = unchanged_count,
+        skipped = skipped_count,
+        failed = failed_count,
+        "update cycle completed"
+    );
+
+    if config.update_self && !config.dry_run && !config.docker_monitor_only {
+        if let Some(self_container) = evaluated.self_container {
+            match engine
+                .schedule_self_update(
+                    &self_container,
+                    config.docker_stop_timeout,
+                    config.docker_healthcheck_timeout,
+                )
+                .await
+            {
+                Ok(true) => {
+                    info!(container = %self_container.name, "self-update helper started; exiting daemon to hand off replacement");
+                    return true;
+                }
+                Ok(false) => {
+                    info!(container = %self_container.name, "systower image unchanged; no self-update needed");
+                }
+                Err(error) => {
+                    warn!(container = %self_container.name, %error, "self-update failed");
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Compose is an independent opt-in update path: it only uses configured source
@@ -247,9 +318,7 @@ async fn run_system_update(config: &Config) {
             info!("host package update planned (dry run)");
             return;
         }
-        let result = std::fs::read_to_string("/proc/1/root/etc/os-release")
-            .or_else(|_| std::fs::read_to_string("/etc/os-release"))
-            .map_err(crate::host::HostError::from)
+        let result = crate::host::read_host_os_release()
             .and_then(|contents| crate::host::plan(&contents))
             .map(|mut plan| {
                 if config.system_full_upgrade

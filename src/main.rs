@@ -49,6 +49,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("image: {image}");
                 println!("identity: {image_id}");
             }
+            DockerCommand::SelfReplace {
+                container,
+                image,
+                stop_timeout,
+                health_timeout,
+            } => {
+                let engine = DockerEngine::connect().await?;
+                engine
+                    .self_replace(&container, &image, stop_timeout, health_timeout)
+                    .await?;
+                println!("self-replace completed for {container}");
+            }
             DockerCommand::Update {
                 container,
                 image,
@@ -107,15 +119,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::System(args) => match args.command {
             SystemCommand::Check => {
-                let contents = std::fs::read_to_string("/proc/1/root/etc/os-release")
-                    .or_else(|_| std::fs::read_to_string("/etc/os-release"))?;
+                let contents = host::read_host_os_release()?;
                 let plan = host::plan(&contents)?;
                 println!("distribution: {:?}", plan.distribution);
                 println!("package command: {}", plan.command.join(" "));
             }
             SystemCommand::Update { dry_run } => {
-                let contents = std::fs::read_to_string("/proc/1/root/etc/os-release")
-                    .or_else(|_| std::fs::read_to_string("/etc/os-release"))?;
+                let contents = host::read_host_os_release()?;
                 let plan = host::plan(&contents)?;
                 println!("distribution: {:?}", plan.distribution);
                 println!("planned command: {}", plan.command.join(" "));

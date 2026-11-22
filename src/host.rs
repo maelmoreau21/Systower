@@ -49,6 +49,31 @@ pub fn parse_os_release(contents: &str) -> HashMap<String, String> {
         .collect()
 }
 
+pub fn read_host_os_release() -> Result<String, HostError> {
+    let has_proc1_root = Path::new("/proc/1/root").exists();
+    if has_proc1_root && std::process::id() == 1 {
+        return Err(HostError::Unsupported(
+            "container is not running with pid: host; host OS updates unavailable".into(),
+        ));
+    }
+    let dsm_version = fs::read_to_string("/proc/1/root/etc.defaults/VERSION")
+        .or_else(|_| fs::read_to_string("/etc.defaults/VERSION"));
+    if let Ok(version) = dsm_version {
+        if version.contains("os_name=\"DSM\"") || version.contains("os_name=DSM") {
+            return Err(HostError::Unsupported(
+                "Synology DSM (managed by DSM)".into(),
+            ));
+        }
+    }
+    if has_proc1_root {
+        fs::read_to_string("/proc/1/root/etc/os-release")
+            .or_else(|_| fs::read_to_string("/etc/os-release"))
+            .map_err(HostError::from)
+    } else {
+        fs::read_to_string("/etc/os-release").map_err(HostError::from)
+    }
+}
+
 pub fn distribution(os_release: &HashMap<String, String>) -> Distribution {
     match os_release.get("ID").map(String::as_str) {
         Some("debian") => Distribution::Debian,
