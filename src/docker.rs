@@ -4,14 +4,15 @@ use std::{
 };
 
 use bollard::{
-    container::{
-        Config as DockerConfig, CreateContainerOptions, ListContainersOptions, NetworkingConfig,
-        RemoveContainerOptions, RenameContainerOptions, StartContainerOptions,
+    models::{
+        ContainerCreateBody, ContainerInspectResponse, ContainerSummary, EndpointSettings,
+        HostConfig, NetworkConnectRequest, NetworkingConfig,
+    },
+    query_parameters::{
+        CreateContainerOptions, CreateImageOptions, ListContainersOptions, PruneImagesOptions,
+        RemoveContainerOptions, RemoveImageOptions, RenameContainerOptions, StartContainerOptions,
         StopContainerOptions,
     },
-    image::{CreateImageOptions, PruneImagesOptions, RemoveImageOptions},
-    models::{ContainerInspectResponse, ContainerSummary, EndpointSettings, HostConfig},
-    network::ConnectNetworkOptions,
     Docker,
 };
 use futures_util::StreamExt;
@@ -56,7 +57,7 @@ pub struct ContainerSnapshot {
 }
 
 pub struct RecreationConfig {
-    pub config: DockerConfig<String>,
+    pub config: ContainerCreateBody,
     pub extra_networks: Vec<(String, EndpointSettings)>,
 }
 
@@ -97,7 +98,7 @@ impl RecreationConfig {
             .get("Config")
             .cloned()
             .ok_or_else(|| DockerError::MissingImageIdentity("container config".into()))?;
-        let mut config: DockerConfig<String> = serde_json::from_value(config_value)?;
+        let mut config: ContainerCreateBody = serde_json::from_value(config_value)?;
         config.image = Some(target_image.into());
         if let Some(host_config) = value.get("HostConfig") {
             config.host_config = Some(serde_json::from_value(host_config.clone())?);
@@ -144,7 +145,7 @@ impl RecreationConfig {
                         let mut primary = std::collections::HashMap::new();
                         primary.insert(first_net, first_ep);
                         config.networking_config = Some(NetworkingConfig {
-                            endpoints_config: primary,
+                            endpoints_config: Some(primary),
                         });
                     }
                     extra_networks.extend(iter);
@@ -173,7 +174,7 @@ impl ContainerSnapshot {
             image: summary.image.unwrap_or_default(),
             image_id: summary.image_id.unwrap_or_default(),
             labels: summary.labels.unwrap_or_default(),
-            state: summary.state.unwrap_or_default(),
+            state: summary.state.map(|s| s.to_string()).unwrap_or_default(),
             status: summary.status.unwrap_or_default(),
             mounts_docker_socket: false,
             network_mode: String::new(),
@@ -365,7 +366,7 @@ impl DockerEngine {
                 .rename_container(
                     &backup_name,
                     RenameContainerOptions {
-                        name: &original_name,
+                        name: original_name.clone(),
                     },
                 )
                 .await
@@ -375,7 +376,7 @@ impl DockerEngine {
             }
             if let Err(error) = self
                 .client
-                .start_container::<String>(&original_name, None::<StartContainerOptions<String>>)
+                .start_container(&original_name, None::<StartContainerOptions>)
                 .await
             {
                 transition(&mut transaction, TransactionState::RollbackFailed, journal)?;
@@ -406,7 +407,7 @@ impl DockerEngine {
     ) -> Result<EvaluatedContainers, DockerError> {
         let summaries = self
             .client
-            .list_containers(Some(ListContainersOptions::<String> {
+            .list_containers(Some(ListContainersOptions {
                 all: false,
                 ..Default::default()
             }))
@@ -464,7 +465,7 @@ impl DockerEngine {
             return Err(DockerError::MissingImageIdentity(image.to_owned()));
         }
         let options = CreateImageOptions {
-            from_image: image,
+            from_image: Some(image.to_owned()),
             ..Default::default()
         };
         let credentials = crate::registry::credentials_for_image(image)?;
@@ -494,7 +495,9 @@ impl DockerEngine {
         }
         let result = self
             .client
-            .prune_images(Some(PruneImagesOptions { filters }))
+            .prune_images(Some(PruneImagesOptions {
+                filters: Some(filters),
+            }))
             .await?;
         Ok(result.space_reclaimed.unwrap_or(0).max(0) as u64)
     }
@@ -654,7 +657,8 @@ impl DockerEngine {
             .stop_container(
                 container_id,
                 Some(StopContainerOptions {
-                    t: options.stop_timeout as i64,
+                    t: Some(options.stop_timeout as i32),
+                    ..Default::default()
                 }),
             )
             .await
@@ -674,7 +678,7 @@ impl DockerEngine {
             .rename_container(
                 container_id,
                 RenameContainerOptions {
-                    name: backup_name.as_str(),
+                    name: backup_name.clone(),
                 },
             )
             .await
@@ -713,7 +717,7 @@ impl DockerEngine {
         )?;
         if let Err(error) = self
             .client
-            .start_container::<String>(&created_id, None::<StartContainerOptions<String>>)
+            .start_container(&created_id, None::<StartContainerOptions>)
             .await
         {
             return self
@@ -761,6 +765,7 @@ impl DockerEngine {
                     Some(RemoveImageOptions {
                         force: false,
                         noprune: true,
+                        ..Default::default()
                     }),
                     None,
                 )
@@ -801,8 +806,8 @@ impl DockerEngine {
             .client
             .create_container(
                 Some(CreateContainerOptions {
-                    name,
-                    platform: None,
+                    name: Some(name.to_owned()),
+                    ..Default::default()
                 }),
                 recreation.config,
             )
@@ -811,9 +816,9 @@ impl DockerEngine {
             self.client
                 .connect_network(
                     &network,
-                    ConnectNetworkOptions {
+                    NetworkConnectRequest {
                         container: created.id.clone(),
-                        endpoint_config,
+                        endpoint_config: Some(endpoint_config),
                     },
                 )
                 .await?;
@@ -851,7 +856,7 @@ impl DockerEngine {
                 }),
             )
             .await;
-        let helper_config = DockerConfig {
+        let helper_config = ContainerCreateBody {
             image: Some(target_image_id),
             cmd: Some(vec![
                 "docker".into(),
@@ -876,14 +881,14 @@ impl DockerEngine {
             .client
             .create_container(
                 Some(CreateContainerOptions {
-                    name: helper_name.as_str(),
-                    platform: None,
+                    name: Some(helper_name),
+                    ..Default::default()
                 }),
                 helper_config,
             )
             .await?;
         self.client
-            .start_container::<String>(&created.id, None::<StartContainerOptions<String>>)
+            .start_container(&created.id, None::<StartContainerOptions>)
             .await?;
         Ok(true)
     }
@@ -912,7 +917,8 @@ impl DockerEngine {
                     .stop_container(
                         container_name,
                         Some(StopContainerOptions {
-                            t: stop_timeout as i64,
+                            t: Some(stop_timeout as i32),
+                            ..Default::default()
                         }),
                     )
                     .await;
@@ -940,7 +946,7 @@ impl DockerEngine {
             .rename_container(
                 container_name,
                 RenameContainerOptions {
-                    name: backup_name.as_str(),
+                    name: backup_name.clone(),
                 },
             )
             .await?;
@@ -950,7 +956,7 @@ impl DockerEngine {
                 .create_and_connect_container(container_name, recreation)
                 .await?;
             self.client
-                .start_container::<String>(&created_id, None::<StartContainerOptions<String>>)
+                .start_container(&created_id, None::<StartContainerOptions>)
                 .await?;
             self.wait_for_health(
                 container_name,
@@ -982,12 +988,12 @@ impl DockerEngine {
                 .rename_container(
                     &backup_name,
                     RenameContainerOptions {
-                        name: container_name,
+                        name: container_name.to_owned(),
                     },
                 )
                 .await?;
             self.client
-                .start_container::<String>(container_name, None::<StartContainerOptions<String>>)
+                .start_container(container_name, None::<StartContainerOptions>)
                 .await?;
             return Err(error);
         }
@@ -1011,6 +1017,7 @@ impl DockerEngine {
                     Some(RemoveImageOptions {
                         force: false,
                         noprune: true,
+                        ..Default::default()
                     }),
                     None,
                 )
@@ -1031,7 +1038,7 @@ impl DockerEngine {
             .unwrap_or(false);
         if !running {
             self.client
-                .start_container::<String>(container, None::<StartContainerOptions<String>>)
+                .start_container(container, None::<StartContainerOptions>)
                 .await?;
         }
         self.wait_for_health(
@@ -1147,7 +1154,12 @@ impl DockerEngine {
             .await;
         if let Err(error) = self
             .client
-            .rename_container(backup_name, RenameContainerOptions { name })
+            .rename_container(
+                backup_name,
+                RenameContainerOptions {
+                    name: name.to_owned(),
+                },
+            )
             .await
         {
             transition(transaction, TransactionState::RollbackFailed, journal)?;
@@ -1157,7 +1169,7 @@ impl DockerEngine {
         }
         if let Err(error) = self
             .client
-            .start_container::<String>(name, None::<StartContainerOptions<String>>)
+            .start_container(name, None::<StartContainerOptions>)
             .await
         {
             transition(transaction, TransactionState::RollbackFailed, journal)?;
@@ -1264,7 +1276,7 @@ mod tests {
             image: Some("example/api:latest".into()),
             image_id: Some("sha256:old".into()),
             labels: Some(HashMap::from([("systower.exclude".into(), "true".into())])),
-            state: Some("running".into()),
+            state: Some(bollard::models::ContainerSummaryStateEnum::RUNNING),
             status: Some("Up 2 minutes".into()),
             ..Default::default()
         };
@@ -1317,7 +1329,8 @@ mod tests {
             .config
             .networking_config
             .unwrap()
-            .endpoints_config;
+            .endpoints_config
+            .unwrap();
         let endpoint = serde_json::to_value(endpoints.get("app_default").unwrap()).unwrap();
         assert_eq!(endpoint["Aliases"], serde_json::json!(["api", "backend"]));
         assert!(endpoint.get("IPAddress").is_none());
@@ -1370,7 +1383,12 @@ mod tests {
         }))
         .unwrap();
         let rec = RecreationConfig::from_inspect(&multi, "example/api:v2").unwrap();
-        let primary = rec.config.networking_config.unwrap().endpoints_config;
+        let primary = rec
+            .config
+            .networking_config
+            .unwrap()
+            .endpoints_config
+            .unwrap();
         assert_eq!(primary.len(), 1);
         assert!(primary.contains_key("net_a"));
         assert_eq!(rec.extra_networks.len(), 1);

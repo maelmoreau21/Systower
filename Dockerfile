@@ -1,4 +1,4 @@
-FROM rust:1.88-alpine AS builder
+FROM rust:1.100-alpine AS builder
 
 RUN apk add --no-cache musl-dev
 WORKDIR /build
@@ -12,7 +12,7 @@ COPY src ./src
 COPY benches ./benches
 RUN touch src/lib.rs src/main.rs benches/core.rs && cargo build --release
 
-FROM alpine:3.20
+FROM alpine:3.24
 # Optional: Compose increases the image size substantially. Keep the default lean.
 ARG WITH_COMPOSE=false
 RUN apk add --no-cache ca-certificates tzdata util-linux \
